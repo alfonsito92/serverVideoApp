@@ -109,22 +109,22 @@ public class PacketHandler implements IListenDataPacket {
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
 
   private Long standardCostMatrix[][];
-  private Long videoCostMatrix[][];
+  private Long rtpCostMatrix[][];
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
   private Map<Edge, Long> edgeCostMap = new HashMap<Edge, Long>();
-  private Map<Edge, Long> videoEdgeCostMap = new HashMap<Edge, Long>();
+  private Map<Edge, Long> rtpEdgeCostMap = new HashMap<Edge, Long>();
 
 
   private Transformer<Edge, ? extends Number> costTransformer = null;
-  private Transformer<Edge, ? extends Number> costVideoTransformer = null;
+  private Transformer<Edge, ? extends Number> costRTPTransformer = null;
 
   private Graph<Node, Edge> g = new SparseMultigraph();
 
   private DijkstraShortestPath<Node, Edge> standardShortestPath;
-  private DijkstraShortestPath<Node, Edge> videoShortestPath;
+  private DijkstraShortestPath<Node, Edge> rtpShortestPath;
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
@@ -151,7 +151,7 @@ public class PacketHandler implements IListenDataPacket {
 
   private int MAXFLOODPACKET = 5;
 
-  private final Integer videoPort = 5004;
+  private final Integer rtpPort = 5004;
   private final String RTPSTRING = "10000000";
 
   private final Integer audioPort = 2543;
@@ -352,19 +352,9 @@ public class PacketHandler implements IListenDataPacket {
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public void init() {
         log.debug("Routing init() is called");
-        Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
-        this.nodeEdges = edges;
-        buildEdgeMatrix(edges);
-        log.trace("The new map is " + this.nodeEdges);
-        resetLatencyMatrix();
-        createTopologyGraph();
+        this.nodeEdges=null;
+        updateTopology();
 
-        this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
-
-        flood = 0;
-
-        this.packetTime.clear();
-        this.edgePackets.clear();
     }
 
     /**
@@ -437,6 +427,39 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *This function try to assing a cost for each Edge attending The video factors
+    *which is different to Standard evaluation
+    */
+
+    private void buildRTPCostMatrix(){
+      int l = this.nodeEdges.size();
+      int h = this.nodeEdges.size();
+      this.rtpCostMatrix = new Long[l][h];
+      this.rtpEdgeCostMap.clear();
+
+      for(int i=0; i<l; i++){
+
+        for(int j=0; j<h; j++){
+
+          if(i==j){
+            this.rtpCostMatrix[i][j]=0L;
+          }
+          else{
+            if(this.edgeMatrix[i][j]==null){
+              this.rtpCostMatrix[i][j]=null;
+            }
+            else{
+              this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j]) +
+              rtpStatisticsCost(this.edgeMatrix[i][j])/10;
+            }
+          }
+          this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
+        }
+      }
+      buildRTPTransformerMap(this.rtpEdgeCostMap);
+    }
+
+    /**
     *Function that is called when is necessary to build the transformer for Dijkstra
     */
 
@@ -446,6 +469,21 @@ public class PacketHandler implements IListenDataPacket {
         public Long transform(Edge e){
 
           return edgeCostMap2.get(e);
+        }
+      };
+
+    }
+
+    /**
+    *Function that is called when is necessary to build the transformer rtp for Dijkstra
+    */
+
+    private void buildRTPTransformerMap(final Map<Edge, Long> rtpEdgeCostMap2){
+
+      this.costRTPTransformer = new Transformer<Edge, Long>(){
+        public Long transform(Edge e){
+
+          return rtpEdgeCostMap2.get(e);
         }
       };
 
@@ -600,36 +638,36 @@ public class PacketHandler implements IListenDataPacket {
 
     //-128, -95 are the number value of the two first packets rtp which combined with the destination port are enough to detect rtp packet and program flow
 
-  /*
-  Número de versión de RTP (V - versión number): 2 bits. La versión definida por la especificación actual es 2.
-  Relleno (P - Padding): 1 bit. Si el bit del relleno está activado, hay uno o más bytes al final del paquete que no es parte de la carga útil. El último byte del paquete indica el número de bytes de relleno. El relleno es usado por algunos algoritmos de cifrado.
-  La extensión (X - Extensión): 1 bit. Si el bit de extensión está activado, entonces el encabezado fijo es seguido por una extensión del encabezado. Este mecanismo de la extensión posibilita implementaciones para añadir información al encabezado RTP.
-  Conteo CSRC (CC): 4 bits. El número de identificadores CSRC que sigue el encabezado fijo. Si la cuenta CSRC es cero, entonces la fuente de sincronización es la fuente de la carga útil.
-  El marcador (M - Marker): 1 bit. Un bit de marcador definido por el perfil particular de media.
-  Tipo de Carga útil (PT - Payload Type): 7 bits. Un índice en una tabla del perfiles de media que describe el formato de carga útil. Los mapeos de carga útil para audio y vídeo están especificados en el RFC 1890.
-  */
+    /*
+    Número de versión de RTP (V - versión number): 2 bits. La versión definida por la especificación actual es 2.
+    Relleno (P - Padding): 1 bit. Si el bit del relleno está activado, hay uno o más bytes al final del paquete que no es parte de la carga útil. El último byte del paquete indica el número de bytes de relleno. El relleno es usado por algunos algoritmos de cifrado.
+    La extensión (X - Extensión): 1 bit. Si el bit de extensión está activado, entonces el encabezado fijo es seguido por una extensión del encabezado. Este mecanismo de la extensión posibilita implementaciones para añadir información al encabezado RTP.
+    Conteo CSRC (CC): 4 bits. El número de identificadores CSRC que sigue el encabezado fijo. Si la cuenta CSRC es cero, entonces la fuente de sincronización es la fuente de la carga útil.
+    El marcador (M - Marker): 1 bit. Un bit de marcador definido por el perfil particular de media.
+    Tipo de Carga útil (PT - Payload Type): 7 bits. Un índice en una tabla del perfiles de media que describe el formato de carga útil. Los mapeos de carga útil para audio y vídeo están especificados en el RFC 1890.
+    */
 
-  /**
-  *Function that is called when is necessary to check if a Packet is RTP
-  *@param rawPayload The payload of the packet
-  *@param dstPort The dstPort for the packet
-  *@return True or false.
-  */
+    /**
+    *Function that is called when is necessary to check if a Packet is RTP
+    *@param rawPayload The payload of the packet
+    *@param dstPort The dstPort for the packet
+    *@return True or false.
+    */
 
-  private boolean detectRTPPacket(byte[] rawPayload, int dstPort){
-    boolean result = false;
+    private boolean detectRTPPacket(byte[] rawPayload, int dstPort){
+      boolean result = false;
 
-    if(dstPort == videoPort){
-      Byte temp = rawPayload[0];
-      String tempString = Integer.toBinaryString((temp & 0xFF) + 0x100).substring(1);
+      if(dstPort == rtpPort){
+        Byte temp = rawPayload[0];
+        String tempString = Integer.toBinaryString((temp & 0xFF) + 0x100).substring(1);
 
-      if(tempString.equals(RTPSTRING)){
-        result=true;
+        if(tempString.equals(RTPSTRING)){
+          result=true;
+        }
+
       }
-
+      return result;
     }
-    return result;
-  }
 
     /**
     *This function return the NodeConnector where a Host is attached
@@ -894,7 +932,9 @@ public class PacketHandler implements IListenDataPacket {
       Packet pkt = dataPacketService.decodeDataPacket(inPkt);
       NodeConnector egressConnector=null;
       PacketResult result = null;
-
+      traceLongMatrix(mediumLatencyMatrix);
+      traceLongMatrix(latencyMatrix);
+      traceLongMatrix(rtpCostMatrix);
       return result;
     }
 
@@ -1293,9 +1333,102 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *This function is called when is necessary evaluate the latencyMatrix for an edge and
+    *rtp protocol
+    *@param edge The edge
+    *@return The Long value after the process
+    */
+
+    private Long rtpLatencyCost(Edge edge){
+      int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+      int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+      Long ret1 = 0L;
+      Long ret2 = 0L;
+
+      Long cost;
+      if(latencyMatrix!=null){
+        Long temp1 = this.latencyMatrix[i][j];
+        Long temp2 = this.mediumLatencyMatrix[i][j];
+
+        if(temp1 == null){
+          ret1=defaultCost;
+        }
+        if(temp2 == null){
+          ret2=defaultCost;
+        }
+        if(temp1>temp2){
+          cost = (temp1 - temp2)/2;
+        }
+        else if (temp2>temp1){
+          cost = (temp2 - temp1)/2;
+        }else{
+          cost = defaultCost*2;
+        }
+      }
+      else{
+        ret1=defaultCost;
+        ret2=defaultCost;
+        cost=ret1+ret2;
+      }
+
+      return cost;
+    }
+
+    /**
+    *This function is called when is necessary evaluate the statisticsMap for an edge and
+    *rtp protocol
+    *@param edge The edge
+    *@return The Long value after the process
+    */
+
+    private Long rtpStatisticsCost(Edge edge){
+      Long cost = 0L;
+      Long temp1 = 0L;
+      Long temp2 = 0L;
+
+      ArrayList<Long> tempArray = new ArrayList<Long>();
+
+      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+      for(int i=0; i<statisticsName.length; i++){
+        tempArray = tempStatistics.get(statisticsName[i]);
+
+        if(tempArray == null){
+
+          tempArray=new ArrayList<Long>();
+          tempArray.add(10L);
+          tempArray.add(10L);
+
+        }
+
+        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
+          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
+
+          Long tempMax = maxStatistics.get(statisticsName[i]);
+
+          if(tempMax == null){
+            tempMax = tempMedium;
+          }
+
+
+          if(tempMax/tempMedium > 9){
+            cost += 1L;
+          }
+          else{
+            cost += 10L - tempMax/tempMedium;
+          }
+        }
+        else{
+          cost += 1L;
+        }
+      }
+      return cost/5;
+    }
+
+    /**
     *This function is called when is necessary evaluate the latencyMatrix for an edge
     *@param edge The edge
-    *@return The int value after the process
+    *@return The Long value after the process
     */
 
     private Long standardLatencyCost(Edge edge){
@@ -1336,7 +1469,7 @@ public class PacketHandler implements IListenDataPacket {
     /**
     *This function is called when is necessary evaluate the statisticsMap for an edge
     *@param edge The edge
-    *@return The int value after the process
+    *@return The Long value after the process
     */
 
     private Long standardStatisticsMapCost(Edge edge){
@@ -1510,6 +1643,7 @@ public class PacketHandler implements IListenDataPacket {
         createTopologyGraph();
 
         this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
+        //this.rtpShortestPath = new DijkstraShortestPath<Node, Edge>(g, costRTPTransformer);
 
         flood=0;
 
@@ -1518,6 +1652,7 @@ public class PacketHandler implements IListenDataPacket {
       }
       updateEdgeStatistics();
       buildStandardCostMatrix();
+      //buildRTPCostMatrix();
     }
 
 }
