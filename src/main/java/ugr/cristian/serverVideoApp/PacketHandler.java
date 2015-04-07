@@ -153,6 +153,8 @@ public class PacketHandler implements IListenDataPacket {
 
   private final Integer rtpPort = 5004;
   private final String RTPSTRING = "10000000";
+  private final Long RTPFACTOR = 1000L; //To get the difference in ms
+  private final Long RTPDEFAULTCOST = 30L;
 
   private final Integer audioPort = 2543;
   /*************************************/
@@ -352,7 +354,7 @@ public class PacketHandler implements IListenDataPacket {
     @SuppressWarnings({ "unchecked", "rawtypes" })
     public void init() {
         log.debug("Routing init() is called");
-        this.nodeEdges=null;
+        this.nodeEdges=new HashMap<Node, Set<Edge>>();
         updateTopology();
 
     }
@@ -444,15 +446,15 @@ public class PacketHandler implements IListenDataPacket {
           if(i==j){
             this.rtpCostMatrix[i][j]=0L;
           }
-          else{
-            if(this.edgeMatrix[i][j]==null){
-              this.rtpCostMatrix[i][j]=null;
-            }
-            else{
-              this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j]) +
-              rtpStatisticsCost(this.edgeMatrix[i][j])/10;
-            }
+          else if(this.edgeMatrix[i][j]==null){
+            this.rtpCostMatrix[i][j]=null;
           }
+          else{
+
+            this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/RTPFACTOR +
+            rtpStatisticsCost(this.edgeMatrix[i][j])/10;
+          }
+
           this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
         }
       }
@@ -856,9 +858,7 @@ public class PacketHandler implements IListenDataPacket {
         NodeConnector tempDstConnector = findHost(dstAddr);
         Node tempDstNode = tempDstConnector.getNode();
 
-        Map<Node, Node> finalNodes = new HashMap<Node,Node>();
-        finalNodes.put(tempSrcNode, tempDstNode);
-
+        standardShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
         List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
 
         List<Edge> definitivePath;
@@ -932,9 +932,7 @@ public class PacketHandler implements IListenDataPacket {
       Packet pkt = dataPacketService.decodeDataPacket(inPkt);
       NodeConnector egressConnector=null;
       PacketResult result = null;
-      traceLongMatrix(mediumLatencyMatrix);
-      traceLongMatrix(latencyMatrix);
-      traceLongMatrix(rtpCostMatrix);
+
       return result;
     }
 
@@ -1346,32 +1344,34 @@ public class PacketHandler implements IListenDataPacket {
       Long ret1 = 0L;
       Long ret2 = 0L;
 
-      Long cost;
+      Long cost = 0L;
       if(latencyMatrix!=null){
         Long temp1 = this.latencyMatrix[i][j];
         Long temp2 = this.mediumLatencyMatrix[i][j];
 
         if(temp1 == null){
-          ret1=defaultCost;
+          ret1=RTPDEFAULTCOST;
         }
         if(temp2 == null){
-          ret2=defaultCost;
+          ret2=RTPDEFAULTCOST;
         }
-        if(temp1>temp2){
-          cost = (temp1 - temp2)/2;
-        }
-        else if (temp2>temp1){
-          cost = (temp2 - temp1)/2;
-        }else{
-          cost = defaultCost*2;
+
+        if(temp1 != null && temp2 != null){
+          if(temp1>temp2){
+            cost = (temp1 - temp2)/2;
+          }
+          else if (temp2>temp1){
+            cost = (temp2 - temp1)/2;
+          }else{
+            cost = RTPDEFAULTCOST*2;
+          }
         }
       }
       else{
-        ret1=defaultCost;
-        ret2=defaultCost;
+        ret1=RTPDEFAULTCOST;
+        ret2=RTPDEFAULTCOST;
         cost=ret1+ret2;
       }
-
       return cost;
     }
 
@@ -1634,7 +1634,7 @@ public class PacketHandler implements IListenDataPacket {
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
-      if(nodeEdges.equals(null) || !nodeEdges.equals(edges)){
+      if(nodeEdges.isEmpty() || !nodeEdges.equals(edges)){
         removeOldFlow(edges);
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
@@ -1642,17 +1642,15 @@ public class PacketHandler implements IListenDataPacket {
         resetLatencyMatrix();
         createTopologyGraph();
 
-        this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(g, costTransformer);
-        //this.rtpShortestPath = new DijkstraShortestPath<Node, Edge>(g, costRTPTransformer);
-
         flood=0;
 
         this.packetTime.clear();
         this.edgePackets.clear();
       }
+
       updateEdgeStatistics();
       buildStandardCostMatrix();
-      //buildRTPCostMatrix();
+      buildRTPCostMatrix();
     }
 
 }
