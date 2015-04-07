@@ -131,6 +131,8 @@ public class PacketHandler implements IListenDataPacket {
   private short idleTimeOut = 20;
   private short hardTimeOut = 30;
 
+  private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
+
   /*********Statistics Constants**********/
 
   private final String transmitBytes = "Transmits Bytes";
@@ -858,7 +860,11 @@ public class PacketHandler implements IListenDataPacket {
         NodeConnector tempDstConnector = findHost(dstAddr);
         Node tempDstNode = tempDstConnector.getNode();
 
-        standardShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
+        DijkstraShortestPath<Node, Edge> tempD = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
+        if(!tempD.equals(this.standardShortestPath)){
+          this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
+        }
+
         List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
 
         List<Edge> definitivePath;
@@ -933,6 +939,61 @@ public class PacketHandler implements IListenDataPacket {
       NodeConnector egressConnector=null;
       PacketResult result = null;
 
+      if(flood<MAXFLOODPACKET){
+        this.flood++;
+        floodPacket(inPkt, node, ingressConnector);
+      }else{
+
+        NodeConnector tempSrcConnector = findHost(srcAddr);
+        Node tempSrcNode = tempSrcConnector.getNode();
+        NodeConnector tempDstConnector = findHost(dstAddr);
+        Node tempDstNode = tempDstConnector.getNode();
+
+        DijkstraShortestPath<Node, Edge> tempD = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
+        if(!tempD.equals(this.rtpShortestPath)){
+          this.rtpShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costRTPTransformer);
+        }
+        List<Edge> tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
+
+        List<Edge> definitivePath;
+
+        boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
+
+        if(!temp){
+          definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
+        }
+        else{
+          definitivePath = tempPath;
+        }
+        if(definitivePath != null){
+
+          egressConnector = installRTPListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+          tempSrcConnector, tempDstConnector, dstPort);
+
+
+          if(!hasHostConnected(egressConnector)){
+            Edge downEdge = getDownEdge(node, egressConnector);
+            if(downEdge!= null){
+              putPacket(downEdge, pkt);
+            }
+          }
+
+          if(egressConnector!= null){
+          //Send the packet for the selected Port.
+            inPkt.setOutgoingNodeConnector(egressConnector);
+            this.dataPacketService.transmitDataPacket(inPkt);
+          }else{
+            floodPacket(inPkt, node, ingressConnector);
+          }
+          log.debug("holaaaaa");
+          result = PacketResult.CONSUME;
+
+        }else{
+          log.trace("Destination host is unrecheable!");
+          result = PacketResult.IGNORED;
+        }
+      }
+
       return result;
     }
 
@@ -1005,6 +1066,64 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when is necesarry to install a List of flows
+    *All the flows will have two timeOut, idle and Hard.
+    *@param path The Edge List
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param node The node where we have to return the egressConnector
+    *@param srcConnector The Connector src
+    *@param dstConnector The Connector dst
+    *@param dstPort The rtp destination Port
+    *@return The NodeConnector for the node
+    */
+
+    private NodeConnector installRTPListFlows(List<Edge> path, InetAddress srcAddr, byte[] srcMAC_B,
+    InetAddress dstAddr, byte[] dstMAC_B, Node node, NodeConnector srcConnector, NodeConnector dstConnector, int dstPort){
+      NodeConnector result = null;
+      for(int i=0; i<path.size();i++){
+        Edge tempEdge = path.get(i);
+        NodeConnector tempConnector = tempEdge.getTailNodeConnector();
+        Node tempNode = tempConnector.getNode();
+        if(tempNode.equals(node)){
+          result = tempConnector;
+        }
+
+        if(programRTPFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, tempConnector, tempNode, dstPort) ){
+
+          log.trace("Flow installed on " + node + " in the port " + tempConnector);
+
+        }
+        else{
+          log.trace("Error trying to install the flow");
+        }
+
+        if(i == path.size()-1){
+          NodeConnector lastConnector = findHost(dstAddr);
+          Node lastNode = lastConnector.getNode();
+
+
+            if(programRTPFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, lastConnector, lastNode, dstPort) ){
+
+              log.trace("Flow installed on " + lastNode + " in the port " + lastConnector);
+
+            }
+            else{
+              log.trace("Error trying to install the flow");
+            }
+
+        }
+
+      }
+
+      ///////////////////////The dst node will have a flow for the IP
+
+      return result;
+    }
+
+    /**
     *Function that is called when is necessary to put a Association Node,IP and NodeConnector
     *in ourt IPTable.
     *@param node The node where we have to create the association.
@@ -1053,6 +1172,53 @@ public class PacketHandler implements IListenDataPacket {
 
         flow.setIdleTimeout(idleTimeOut);
         flow.setHardTimeout(hardTimeOut);
+
+        // Use FlowProgrammerService to program flow.
+        Status status = flowProgrammerService.addFlowAsync(node, flow);
+        if (!status.isSuccess()) {
+            log.error("Could not program flow: " + status.getDescription());
+            return false;
+        }
+        else{
+        return true;
+      }
+
+    }
+
+    /**
+    *Function that is called when is necesarry to install a flow
+    *All the flows will have two timeOut, idle and Hard.
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param outConnector The dstConnector that will install on the node
+    *@param node The node where the flow will be installed
+    *@param dstPort The destination Port for RTP Packet
+    */
+
+    private boolean programRTPFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
+    byte[] dstMAC_B, NodeConnector outConnector, Node node, int dstPort) {
+
+        Match match = new Match();
+        match.setField(MatchType.DL_TYPE, (short) 0x0800);  // IPv4 ethertype
+        match.setField(MatchType.NW_SRC, srcAddr);
+        match.setField(MatchType.NW_DST, dstAddr);
+        match.setField(MatchType.DL_SRC, srcMAC_B);
+        match.setField(MatchType.DL_DST, dstMAC_B);
+        match.setField(MatchType.TP_DST, (short) dstPort);
+        match.setField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+
+        List<Action> actions = new ArrayList<Action>();
+        actions.add(new Output(outConnector));
+
+        Flow f = new Flow(match, actions);
+
+        // Create the flow
+        Flow flow = new Flow(match, actions);
+
+        flow.setIdleTimeout(idleTimeOut);
+        //flow.setHardTimeout(hardTimeOut);
 
         // Use FlowProgrammerService to program flow.
         Status status = flowProgrammerService.addFlowAsync(node, flow);
