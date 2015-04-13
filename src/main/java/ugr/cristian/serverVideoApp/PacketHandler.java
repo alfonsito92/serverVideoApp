@@ -98,6 +98,10 @@ public class PacketHandler implements IListenDataPacket {
   private ConcurrentMap<Map<Node, InetAddress>, NodeConnector> tableIP = new ConcurrentHashMap<Map<Node, InetAddress>, NodeConnector>();
   private Map<Node, Set<Edge>> nodeEdges = new HashMap<Node, Set<Edge>>();
 
+  private ConcurrentMap<Map<Node, Node>, List<Edge>> rtpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+
+  private ConcurrentMap<Map<Node, Node>, List<Edge>> icmpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+
   private Edge edgeMatrix[][];
 
   private Long latencyMatrix[][];
@@ -159,6 +163,10 @@ public class PacketHandler implements IListenDataPacket {
   private final Long RTPDEFAULTCOST = 30L;
 
   private final Integer audioPort = 2543;
+
+  /*************************************/
+  private final Integer MAXPACKETCOUNTER = 5;
+  private Integer counter = 5;
   /*************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -276,7 +284,12 @@ public class PacketHandler implements IListenDataPacket {
     @Override
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
-      updateTopology();
+      if(counter == MAXPACKETCOUNTER){
+        updateTopology();
+        counter = 0;
+      }else{
+        counter++;
+      }
 
       //First I get the incoming Connector where the packet came.
       NodeConnector ingressConnector = inPkt.getIncomingNodeConnector();
@@ -332,15 +345,6 @@ public class PacketHandler implements IListenDataPacket {
             int dstPort = tcpDatagram.getDestinationPort();
 
             byte[] tcpRawPayload = tcpDatagram.getRawPayload();
-
-
-            /**
-            if(detectRTPPacket(dstPort, tcpRawPayload)){
-              handleRTPPacket();
-            }else if(detectVOIPPacket(dstPort, tcpRawPayload)){
-              handleVOIPPacket();
-            }
-            */
           }
 
         }
@@ -860,12 +864,19 @@ public class PacketHandler implements IListenDataPacket {
         NodeConnector tempDstConnector = findHost(dstAddr);
         Node tempDstNode = tempDstConnector.getNode();
 
-        DijkstraShortestPath<Node, Edge> tempD = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
-        if(!tempD.equals(this.standardShortestPath)){
-          this.standardShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costTransformer);
-        }
+        Map<Node, Node> tempMap = new HashMap<Node, Node>();
+        tempMap.put(tempSrcNode, tempDstNode);
 
-        List<Edge> tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
+        List<Edge> tempPath = new ArrayList<Edge>();
+
+
+        if(rtpPathMap.containsKey(tempMap)){
+         tempPath = rtpPathMap.get(tempMap);
+        }else{
+         this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
+         tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
+         rtpPathMap.put(tempMap, tempPath);
+        }
 
         List<Edge> definitivePath;
 
@@ -949,11 +960,19 @@ public class PacketHandler implements IListenDataPacket {
         NodeConnector tempDstConnector = findHost(dstAddr);
         Node tempDstNode = tempDstConnector.getNode();
 
-        DijkstraShortestPath<Node, Edge> tempD = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
-        if(!tempD.equals(this.rtpShortestPath)){
-          this.rtpShortestPath = new DijkstraShortestPath<Node, Edge>(this.g, this.costRTPTransformer);
-        }
-        List<Edge> tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
+        Map<Node, Node> tempMap = new HashMap<Node, Node>();
+			  tempMap.put(tempSrcNode, tempDstNode);
+
+			  List<Edge> tempPath = new ArrayList<Edge>();
+
+
+        if(rtpPathMap.containsKey(tempMap)){
+				 tempPath = rtpPathMap.get(tempMap);
+			  }else{
+				 this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
+				 tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
+				 rtpPathMap.put(tempMap, tempPath);
+			  }
 
         List<Edge> definitivePath;
 
@@ -985,7 +1004,6 @@ public class PacketHandler implements IListenDataPacket {
           }else{
             floodPacket(inPkt, node, ingressConnector);
           }
-          log.debug("holaaaaa");
           result = PacketResult.CONSUME;
 
         }else{
@@ -1377,7 +1395,35 @@ public class PacketHandler implements IListenDataPacket {
 
     private void removeOldFlow(Map<Node, Set<Edge>> edges){
       Set<Node> nodes = edges.keySet();
-      MAXFLOODPACKET = 3*nodes.size();
+
+    for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
+
+      Node tempNode = it.next();
+      Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
+      Set<Edge> tempEdgesNew = edges.get(tempNode);
+
+      if(tempEdgesOld!=null && tempEdgesNew!=null){
+
+        if(tempEdgesNew.size() < tempEdgesOld.size()){
+
+          for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+
+            Edge tempEdge = it2.next();
+
+            if(!tempEdgesNew.contains(tempEdge)){
+              log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
+              //delFlow(tempEdge, tempNode);
+            }
+
+          }
+
+        }
+        else{
+          log.debug("New edge ");
+        }
+      }
+
+    }
     }
 
     /**
@@ -1801,7 +1847,13 @@ public class PacketHandler implements IListenDataPacket {
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
       if(nodeEdges.isEmpty() || !nodeEdges.equals(edges)){
-        removeOldFlow(edges);
+
+        MAXFLOODPACKET = 3*this.nodeEdges.size();
+
+        if(this.nodeEdges!=null && edges!=null){
+          removeOldFlow(edges);
+        }
+
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
         log.trace("The new map is " + this.nodeEdges);
@@ -1812,6 +1864,10 @@ public class PacketHandler implements IListenDataPacket {
 
         this.packetTime.clear();
         this.edgePackets.clear();
+        this.rtpPathMap.clear();
+        this.icmpPathMap.clear();
+
+        log.debug("The topology has been updated");
       }
 
       updateEdgeStatistics();

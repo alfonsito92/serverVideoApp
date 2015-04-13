@@ -28,6 +28,7 @@
             </Bundle-Activator>
           </instructions>
           <manifestLocation>${project.basedir}/META-INF</manifestLocation>
+          <buildDirectory>/home/cristian/Distribution_Base/opendaylight_2_2/plugins/</buildDirectory>
         </configuration>
       </plugin>
     </plugins>
