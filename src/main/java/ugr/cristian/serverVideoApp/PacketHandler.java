@@ -68,6 +68,7 @@ import org.opendaylight.controller.sal.packet.UDP;
 import org.opendaylight.controller.sal.packet.Packet;
 import org.opendaylight.controller.sal.packet.PacketResult;
 import org.opendaylight.controller.sal.packet.RawPacket;
+import org.opendaylight.controller.sal.reader.FlowOnNode;
 import org.opendaylight.controller.sal.reader.NodeConnectorStatistics;
 import org.opendaylight.controller.sal.utils.IPProtocols;
 import org.opendaylight.controller.sal.utils.Status;
@@ -643,6 +644,41 @@ public class PacketHandler implements IListenDataPacket {
         }
       }
     }
+
+    /**
+    *Function that is called when a edge is down
+    *@param edge The edge which is down.
+    *@param node The node where the edge is detected
+    */
+
+    private void delFlow(Edge edge, Node node){
+
+      NodeConnector tempConnector = edge.getTailNodeConnector();
+      Node tempNode = tempConnector.getNode();
+
+      if(tempNode.equals(node)){
+        List<FlowOnNode> flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+
+        for(int i=0; i<flowsOnNode.size(); i++){
+          FlowOnNode tempFlowOnNode = flowsOnNode.get(i);
+          Flow tempFlow = tempFlowOnNode.getFlow();
+          if(tempFlow!=null){
+            List<Action> oldActions = tempFlow.getActions();
+
+            if(oldActions!=null){
+              List<Action> tempActions = new ArrayList<Action>();
+              tempActions.add(new Output(tempConnector));
+
+              if(tempActions.equals(oldActions)){
+                log.trace("Deleting flow with outputAction "+tempConnector);
+                flowProgrammerService.removeFlow(tempNode, tempFlow);
+              }
+            }
+          }
+        }
+      }
+    }
+
 
     //-128, -95 are the number value of the two first packets rtp which combined with the destination port are enough to detect rtp packet and program flow
 
@@ -1396,34 +1432,35 @@ public class PacketHandler implements IListenDataPacket {
     private void removeOldFlow(Map<Node, Set<Edge>> edges){
       Set<Node> nodes = edges.keySet();
 
-    for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
+      for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
 
-      Node tempNode = it.next();
-      Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
-      Set<Edge> tempEdgesNew = edges.get(tempNode);
+        Node tempNode = it.next();
+        Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
+        Set<Edge> tempEdgesNew = edges.get(tempNode);
 
-      if(tempEdgesOld!=null && tempEdgesNew!=null){
+        if(tempEdgesOld!=null && tempEdgesNew!=null){
 
-        if(tempEdgesNew.size() < tempEdgesOld.size()){
+          if(tempEdgesNew.size() < tempEdgesOld.size()){
 
-          for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+            for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
 
-            Edge tempEdge = it2.next();
+              Edge tempEdge = it2.next();
 
-            if(!tempEdgesNew.contains(tempEdge)){
-              log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
-              //delFlow(tempEdge, tempNode);
+              if(!tempEdgesNew.contains(tempEdge)){
+                log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
+                delFlow(tempEdge, tempNode);
+                log.debug("aqui nos quedamos");
+              }
+
             }
 
           }
+          else{
+            log.debug("New edge ");
+          }
+        }
 
-        }
-        else{
-          log.debug("New edge ");
-        }
       }
-
-    }
     }
 
     /**
@@ -1850,6 +1887,12 @@ public class PacketHandler implements IListenDataPacket {
 
         MAXFLOODPACKET = 3*this.nodeEdges.size();
 
+        this.packetTime.clear();
+        this.edgePackets.clear();
+        this.rtpPathMap.clear();
+        this.icmpPathMap.clear();
+        flood=0;
+
         if(this.nodeEdges!=null && edges!=null){
           removeOldFlow(edges);
         }
@@ -1859,13 +1902,6 @@ public class PacketHandler implements IListenDataPacket {
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
-
-        flood=0;
-
-        this.packetTime.clear();
-        this.edgePackets.clear();
-        this.rtpPathMap.clear();
-        this.icmpPathMap.clear();
 
         log.debug("The topology has been updated");
       }
