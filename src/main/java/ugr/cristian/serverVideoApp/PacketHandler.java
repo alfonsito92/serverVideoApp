@@ -906,12 +906,12 @@ public class PacketHandler implements IListenDataPacket {
         List<Edge> tempPath = new ArrayList<Edge>();
 
 
-        if(rtpPathMap.containsKey(tempMap)){
-         tempPath = rtpPathMap.get(tempMap);
+        if(icmpPathMap.containsKey(tempMap)){
+         tempPath = icmpPathMap.get(tempMap);
         }else{
-         this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
-         tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
-         rtpPathMap.put(tempMap, tempPath);
+         this.standardShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTransformer);
+         tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
+         icmpPathMap.put(tempMap, tempPath);
         }
 
         List<Edge> definitivePath;
@@ -925,7 +925,7 @@ public class PacketHandler implements IListenDataPacket {
           definitivePath = tempPath;
         }
         if(definitivePath != null){
-
+          log.debug("definitive Path "+definitivePath);
           egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
           tempSrcConnector, tempDstConnector);
 
@@ -1449,17 +1449,25 @@ public class PacketHandler implements IListenDataPacket {
               if(!tempEdgesNew.contains(tempEdge)){
                 log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
                 delFlow(tempEdge, tempNode);
-                log.debug("aqui nos quedamos");
+
               }
 
             }
 
           }
-          else{
-            log.debug("New edge ");
+          else if(tempEdgesNew.size() > tempEdgesOld.size()){
+            for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+
+              Edge tempEdge = it2.next();
+
+              if(!tempEdgesOld.contains(tempEdge)){
+                log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is a new Edge");
+                delFlow(tempEdge, tempNode);
+
+              }
+            }
           }
         }
-
       }
     }
 
@@ -1490,6 +1498,7 @@ public class PacketHandler implements IListenDataPacket {
       boolean orientacion = true;
 
       List<Edge> result = new ArrayList();
+      List<Edge> definitivePath = new ArrayList();
 
       if(path.get(0).getTailNodeConnector().getNode().equals(srcNode)){
         orden=true;
@@ -1536,7 +1545,38 @@ public class PacketHandler implements IListenDataPacket {
         }
         result.add(this.edgeMatrix[n1][n2]);
       }
-      return result;
+
+      ////////////////////////
+      //Better reordenating
+      ///////////////////////
+
+      definitivePath.add(result.get(0));
+      log.debug("original path "+path);
+      log.debug("intermedium path "+result);
+
+      for(int j=1; j<result.size(); j++){
+
+        Edge tempEdge2 = result.get(j);
+        Edge tempEdge1 = result.get(j-1);
+
+        Node tempNode1 = tempEdge1.getHeadNodeConnector().getNode();
+        Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
+
+        Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
+
+        log.debug("tempNode1 "+tempNode1+" el 2 "+tempNode2+ " el aux "+tempNodeAux);
+
+        if(tempNode1.equals(tempNode2)){
+          definitivePath.add(result.get(j));
+        }else if(tempNode1.equals(tempNodeAux)){
+          int aux1 = getNodeConnectorIndex(tempEdge2.getHeadNodeConnector());
+          int aux2 = getNodeConnectorIndex(tempEdge2.getTailNodeConnector());
+
+          definitivePath.add(this.edgeMatrix[aux1][aux2]);
+        }
+      }
+
+      return definitivePath;
 
     }
 
