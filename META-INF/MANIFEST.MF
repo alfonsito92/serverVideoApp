@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1428998021079
+Bnd-LastModified: 1429003584875
 Build-Jdk: 1.7.0_75
 Built-By: cristian
 Bundle-Activator: ugr.cristian.serverVideoApp.Activator

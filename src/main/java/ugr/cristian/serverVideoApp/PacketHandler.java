@@ -86,7 +86,9 @@ import org.apache.commons.collections15.Transformer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PacketHandler implements IListenDataPacket {
+public class PacketHandler implements IListenDataPacket, Runnable {
+
+  public void run(){}
 
   private static final Logger log = LoggerFactory.getLogger(PacketHandler.class);
 
@@ -1455,6 +1457,7 @@ public class PacketHandler implements IListenDataPacket {
             }
 
           }
+          /*
           else if(tempEdgesNew.size() > tempEdgesOld.size()){
             for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
 
@@ -1467,6 +1470,7 @@ public class PacketHandler implements IListenDataPacket {
               }
             }
           }
+          */
         }
       }
     }
@@ -1551,8 +1555,7 @@ public class PacketHandler implements IListenDataPacket {
       ///////////////////////
 
       definitivePath.add(result.get(0));
-      log.debug("original path "+path);
-      log.debug("intermedium path "+result);
+
 
       for(int j=1; j<result.size(); j++){
 
@@ -1563,8 +1566,6 @@ public class PacketHandler implements IListenDataPacket {
         Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
 
         Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
-
-        log.debug("tempNode1 "+tempNode1+" el 2 "+tempNode2+ " el aux "+tempNodeAux);
 
         if(tempNode1.equals(tempNode2)){
           definitivePath.add(result.get(j));
