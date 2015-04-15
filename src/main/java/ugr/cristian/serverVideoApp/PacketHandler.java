@@ -22,6 +22,7 @@ package ugr.cristian.serverVideoApp;
 */
 
 import java.lang.System;
+import java.util.concurrent.Semaphore;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -86,9 +87,7 @@ import org.apache.commons.collections15.Transformer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class PacketHandler implements IListenDataPacket, Runnable {
-
-  public void run(){}
+public class PacketHandler implements IListenDataPacket {
 
   private static final Logger log = LoggerFactory.getLogger(PacketHandler.class);
 
@@ -171,6 +170,11 @@ public class PacketHandler implements IListenDataPacket, Runnable {
   private final Integer MAXPACKETCOUNTER = 5;
   private Integer counter = 5;
   /*************************************/
+
+  /*************************************/
+  static final Semaphore semaforo=new Semaphore(1);
+  static final Semaphore delFlowSemaforo = new Semaphore(1);
+  /************************************/
 
   static private InetAddress intToInetAddress(int i) {
     byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
@@ -288,6 +292,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
       if(counter == MAXPACKETCOUNTER){
+
         updateTopology();
         counter = 0;
       }else{
@@ -653,32 +658,49 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     *@param node The node where the edge is detected
     */
 
-    private void delFlow(Edge edge, Node node){
+    private boolean delFlow(Edge edge, Node node){
 
       NodeConnector tempConnector = edge.getTailNodeConnector();
       Node tempNode = tempConnector.getNode();
+      boolean result = false;
+      List<FlowOnNode> flowsOnNode = new ArrayList();
 
-      if(tempNode.equals(node)){
-        List<FlowOnNode> flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+        if(tempNode.equals(node)){
+          log.debug("hola");
 
-        for(int i=0; i<flowsOnNode.size(); i++){
-          FlowOnNode tempFlowOnNode = flowsOnNode.get(i);
-          Flow tempFlow = tempFlowOnNode.getFlow();
-          if(tempFlow!=null){
-            List<Action> oldActions = tempFlow.getActions();
-
-            if(oldActions!=null){
-              List<Action> tempActions = new ArrayList<Action>();
-              tempActions.add(new Output(tempConnector));
-
-              if(tempActions.equals(oldActions)){
-                log.trace("Deleting flow with outputAction "+tempConnector);
-                flowProgrammerService.removeFlow(tempNode, tempFlow);
-              }
-            }
+          try{
+            flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
           }
-        }
+          catch(RuntimeException bad){
+            log.debug("impossible to obtain the flows on the node "+tempNode);
+          }
+          log.debug("adios");
+
+          for(int i=0; i<flowsOnNode.size(); i++){
+
+
+              FlowOnNode tempFlowOnNode = flowsOnNode.get(i);
+              Flow tempFlow = tempFlowOnNode.getFlow();
+
+              if(tempFlow!=null){
+                List<Action> oldActions = tempFlow.getActions();
+
+                if(oldActions!=null){
+                  List<Action> tempActions = new ArrayList<Action>();
+                  tempActions.add(new Output(tempConnector));
+
+                  if(tempActions.equals(oldActions)){
+                    log.debug("Deleting flow with outputAction "+tempConnector+ " in the node "+node);
+
+                    flowProgrammerService.removeFlow(tempNode, tempFlow);
+
+                  }
+                }
+              }
+
+          }
       }
+      return result;
     }
 
 
@@ -927,7 +949,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
           definitivePath = tempPath;
         }
         if(definitivePath != null){
-          log.debug("definitive Path "+definitivePath);
+
           egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
           tempSrcConnector, tempDstConnector);
 
@@ -1207,7 +1229,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     *@param node The node where the flow will be installed
     */
 
-    private boolean programFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
+    synchronized private boolean programFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
     byte[] dstMAC_B, NodeConnector outConnector, Node node) {
 
         Match match = new Match();
@@ -1231,8 +1253,9 @@ public class PacketHandler implements IListenDataPacket, Runnable {
 
         // Use FlowProgrammerService to program flow.
         Status status = flowProgrammerService.addFlowAsync(node, flow);
+
         if (!status.isSuccess()) {
-            log.error("Could not program flow: " + status.getDescription());
+            log.debug("Could not program flow: " + status.getDescription());
             return false;
         }
         else{
@@ -1253,7 +1276,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     *@param dstPort The destination Port for RTP Packet
     */
 
-    private boolean programRTPFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
+    synchronized private boolean programRTPFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
     byte[] dstMAC_B, NodeConnector outConnector, Node node, int dstPort) {
 
         Match match = new Match();
@@ -1431,7 +1454,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     *@param edges The new node association Set<Edge> that have to be compared with the old topology
     */
 
-    private void removeOldFlow(Map<Node, Set<Edge>> edges){
+    synchronized private void removeOldFlow(Map<Node, Set<Edge>> edges){
       Set<Node> nodes = edges.keySet();
 
       for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
@@ -1445,18 +1468,19 @@ public class PacketHandler implements IListenDataPacket, Runnable {
           if(tempEdgesNew.size() < tempEdgesOld.size()){
 
             for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
-
+              boolean success = false;
               Edge tempEdge = it2.next();
 
               if(!tempEdgesNew.contains(tempEdge)){
                 log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
+
                 delFlow(tempEdge, tempNode);
 
-              }
 
             }
 
           }
+        }
           /*
           else if(tempEdgesNew.size() > tempEdgesOld.size()){
             for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
@@ -1566,6 +1590,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
         Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
 
         Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
+
 
         if(tempNode1.equals(tempNode2)){
           definitivePath.add(result.get(j));
@@ -1920,7 +1945,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
     *Function that is called when is necessary update the current Topology store
     */
 
-    private void updateTopology(){
+    synchronized private void updateTopology(){
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
@@ -1935,6 +1960,7 @@ public class PacketHandler implements IListenDataPacket, Runnable {
         flood=0;
 
         if(this.nodeEdges!=null && edges!=null){
+
           removeOldFlow(edges);
         }
 
