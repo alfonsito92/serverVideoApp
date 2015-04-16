@@ -636,6 +636,9 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *The function is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be founded in
+    *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necessary flood a determinate packet for all the nodeConnector in a node
     *@param inPkt pakect that we have to flood
     *@param node the node which solicite the listenDataPacketService
@@ -1070,6 +1073,10 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *The function is a modification of an another function. The original
+    *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be founded in
+    *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necesarry to install a flow
     *All the flows will have two timeOut, idle and Hard.
     *@param srcAddr The source IPv4 Address
@@ -1103,21 +1110,31 @@ public class PacketHandler implements IListenDataPacket {
         flow.setHardTimeout(hardTimeOut);
 
         // Use FlowProgrammerService to program flow.
-        semaphore.tryAcquire();
-        Status status = flowProgrammerService.addFlowAsync(node, flow);
-        semaphore.release();
+        try{
+          semaphore.tryAcquire();
+          Status status = flowProgrammerService.addFlowAsync(node, flow);
+          semaphore.release();
 
-        if (!status.isSuccess()) {
-            log.trace("Could not program flow: " + status.getDescription());
-            return false;
+          if (!status.isSuccess()) {
+              log.trace("Could not program flow: " + status.getDescription());
+              return false;
+          }
+          else{
+          return true;
+          }
         }
-        else{
-        return true;
-      }
+        catch(RuntimeException unexpectError){
+          log.trace("Error trying to install the flow");
+          return false;
+        }
 
     }
 
     /**
+    *The function is a modification of an another function. The original
+    *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be founded in
+    *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necesarry to install a flow
     *All the flows will have two timeOut, idle and Hard.
     *@param srcAddr The source IPv4 Address
@@ -1149,21 +1166,24 @@ public class PacketHandler implements IListenDataPacket {
         // Create the flow
         Flow flow = new Flow(match, actions);
 
-        flow.setIdleTimeout(idleTimeOut);
-        //flow.setHardTimeout(hardTimeOut);
-
         // Use FlowProgrammerService to program flow.
-        semaphore.tryAcquire();
-        Status status = flowProgrammerService.addFlowAsync(node, flow);
-        semaphore.release();
+        try{
+          semaphore.tryAcquire();
+          Status status = flowProgrammerService.addFlowAsync(node, flow);
+          semaphore.release();
 
-        if (!status.isSuccess()) {
-            log.error("Could not program flow: " + status.getDescription());
-            return false;
+          if (!status.isSuccess()) {
+              log.trace("Could not program flow: " + status.getDescription());
+              return false;
+          }
+          else{
+          return true;
+          }
         }
-        else{
-        return true;
-      }
+        catch(RuntimeException unexpectError){
+          log.trace("Error trying to install the flow");
+          return false;
+        }
 
     }
 
