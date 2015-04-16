@@ -1,5 +1,5 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1429093128517
+Bnd-LastModified: 1429177898766
 Build-Jdk: 1.7.0_75
 Built-By: cristian
 Bundle-Activator: ugr.cristian.serverVideoApp.Activator
@@ -13,9 +13,9 @@ Export-Package: ugr.cristian.serverVideoApp;uses:="org.opendaylight.cont
  daylight.controller.statisticsmanager,org.opendaylight.controller.topol
  ogymanager,org.apache.felix.dm,org.opendaylight.controller.switchmanage
  r,org.opendaylight.controller.sal.packet,org.slf4j,org.apache.commons.c
- ollections15,org.opendaylight.controller.sal.reader,org.opendaylight.co
- ntroller.sal.utils,org.opendaylight.controller.sal.action,edu.uci.ics.j
- ung.algorithms.shortestpath,edu.uci.ics.jung.graph,org.opendaylight.con
+ ollections15,edu.uci.ics.jung.algorithms.shortestpath,edu.uci.ics.jung.
+ graph,org.opendaylight.controller.sal.reader,org.opendaylight.controlle
+ r.sal.utils,org.opendaylight.controller.sal.action,org.opendaylight.con
  troller.sal.match";version="2.0.0.SNAPSHOT"
 Import-Package: edu.uci.ics.jung.algorithms.shortestpath;version="[2.0,3
  )",edu.uci.ics.jung.graph;version="[2.0,3)",org.apache.commons.collecti

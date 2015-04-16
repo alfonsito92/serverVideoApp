@@ -139,6 +139,8 @@ public class PacketHandler implements IListenDataPacket {
 
   private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
 
+  private ICMPRouting icmpRouting = null;
+
   /*********Statistics Constants**********/
 
   private final String transmitBytes = "Transmits Bytes";
@@ -167,13 +169,16 @@ public class PacketHandler implements IListenDataPacket {
   private final Integer audioPort = 2543;
 
   /*************************************/
-  private final Integer MAXPACKETCOUNTER = 5;
-  private Integer counter = 5;
+  private final Long UPDATETIME = 1000L;
+  private Long t1 = System.currentTimeMillis();
+  private Long t2 = 0L;
   /*************************************/
 
   /*************************************/
-  static final Semaphore semaforo=new Semaphore(1);
-  static final Semaphore delFlowSemaforo = new Semaphore(1);
+  static final Semaphore semaphore=new Semaphore(1);
+  static final Semaphore delFlowSemaphore = new Semaphore(1);
+  static final Semaphore timeSemaphore = new Semaphore(1);
+  static final Semaphore icmpSemaphore = new Semaphore(1);
   /************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -251,6 +256,9 @@ public class PacketHandler implements IListenDataPacket {
     /**
      * Sets a reference to the requested StatisticsService
      */
+    /**
+     * Sets a reference to the requested StatisticsService
+     */
     void setStatisticsManagerService(IStatisticsManager s) {
         log.trace("Set StatisticsManagerService.");
 
@@ -291,13 +299,14 @@ public class PacketHandler implements IListenDataPacket {
     @Override
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
-      if(counter == MAXPACKETCOUNTER){
+      t2 = System.currentTimeMillis();
 
+      timeSemaphore.tryAcquire();
+      if((t2-t1) > UPDATETIME){
         updateTopology();
-        counter = 0;
-      }else{
-        counter++;
+        t1 = System.currentTimeMillis();
       }
+      timeSemaphore.release();
 
       //First I get the incoming Connector where the packet came.
       NodeConnector ingressConnector = inPkt.getIncomingNodeConnector();
@@ -666,15 +675,18 @@ public class PacketHandler implements IListenDataPacket {
       List<FlowOnNode> flowsOnNode = new ArrayList();
 
         if(tempNode.equals(node)){
-          log.debug("hola");
 
           try{
-            flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+            flowsOnNode = statisticsManager.getFlows(tempNode);
           }
           catch(RuntimeException bad){
-            log.debug("impossible to obtain the flows on the node "+tempNode);
+            try{
+              flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+            }
+            catch(RuntimeException veryBad){
+              log.trace("Impossible to obtain the flows");
+            }
           }
-          log.debug("adios");
 
           for(int i=0; i<flowsOnNode.size(); i++){
 
@@ -690,9 +702,16 @@ public class PacketHandler implements IListenDataPacket {
                   tempActions.add(new Output(tempConnector));
 
                   if(tempActions.equals(oldActions)){
-                    log.debug("Deleting flow with outputAction "+tempConnector+ " in the node "+node);
-
-                    flowProgrammerService.removeFlow(tempNode, tempFlow);
+                    log.trace("Deleting flow with outputAction "+tempConnector+ " in the node "+node);
+                    semaphore.tryAcquire();
+                    try{
+                      flowProgrammerService.removeFlow(tempNode, tempFlow);
+                    }
+                    catch(RuntimeException e8){
+                      log.trace("Error removing flow");
+                    }
+                    log.trace("success removing flow");
+                    semaphore.release();
 
                   }
                 }
@@ -924,31 +943,22 @@ public class PacketHandler implements IListenDataPacket {
         NodeConnector tempDstConnector = findHost(dstAddr);
         Node tempDstNode = tempDstConnector.getNode();
 
-        Map<Node, Node> tempMap = new HashMap<Node, Node>();
-        tempMap.put(tempSrcNode, tempDstNode);
+        List<Edge> definitivePath = new ArrayList<Edge>();
 
-        List<Edge> tempPath = new ArrayList<Edge>();
-
-
-        if(icmpPathMap.containsKey(tempMap)){
-         tempPath = icmpPathMap.get(tempMap);
-        }else{
-         this.standardShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTransformer);
-         tempPath = standardShortestPath.getPath(tempSrcNode, tempDstNode);
-         icmpPathMap.put(tempMap, tempPath);
+        try{
+          this.icmpSemaphore.tryAcquire();
+          definitivePath = this.icmpRouting.getICMPShortestPath(tempSrcNode, tempDstNode);
+          this.icmpSemaphore.release();
+        }
+        catch(RuntimeException badDijkstraICMP){
+          log.debug("Impossible to obtain the best Path, please update your topology");
+          updateICMPGraph();
+          return PacketResult.IGNORED;
         }
 
-        List<Edge> definitivePath;
 
-        boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
 
-        if(!temp){
-          definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
-        }
-        else{
-          definitivePath = tempPath;
-        }
-        if(definitivePath != null){
+        if(definitivePath != null || definitivePath.isEmpty()){
 
           egressConnector = installListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
           tempSrcConnector, tempDstConnector);
@@ -1252,10 +1262,12 @@ public class PacketHandler implements IListenDataPacket {
         flow.setHardTimeout(hardTimeOut);
 
         // Use FlowProgrammerService to program flow.
+        semaphore.tryAcquire();
         Status status = flowProgrammerService.addFlowAsync(node, flow);
+        semaphore.release();
 
         if (!status.isSuccess()) {
-            log.debug("Could not program flow: " + status.getDescription());
+            log.trace("Could not program flow: " + status.getDescription());
             return false;
         }
         else{
@@ -1300,7 +1312,10 @@ public class PacketHandler implements IListenDataPacket {
         //flow.setHardTimeout(hardTimeOut);
 
         // Use FlowProgrammerService to program flow.
+        semaphore.tryAcquire();
         Status status = flowProgrammerService.addFlowAsync(node, flow);
+        semaphore.release();
+
         if (!status.isSuccess()) {
             log.error("Could not program flow: " + status.getDescription());
             return false;
@@ -1472,7 +1487,7 @@ public class PacketHandler implements IListenDataPacket {
               Edge tempEdge = it2.next();
 
               if(!tempEdgesNew.contains(tempEdge)){
-                log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is down");
+                log.trace("The edge "+tempEdge+ " in the node "+tempNode+" is down now");
 
                 delFlow(tempEdge, tempNode);
 
@@ -1942,6 +1957,15 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *This function update the graph for ICMPRouting.
+    */
+
+    private void updateICMPGraph(){
+      createTopologyGraph();
+      this.icmpRouting.updateGraph(this.g);
+    }
+
+    /**
     *Function that is called when is necessary update the current Topology store
     */
 
@@ -1949,7 +1973,7 @@ public class PacketHandler implements IListenDataPacket {
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
-      if(nodeEdges.isEmpty() || !nodeEdges.equals(edges)){
+      if(nodeEdges.isEmpty() || !nodeEdges.equals(edges) || this.nodeEdges == null){
 
         MAXFLOODPACKET = 3*this.nodeEdges.size();
 
@@ -1970,12 +1994,25 @@ public class PacketHandler implements IListenDataPacket {
         resetLatencyMatrix();
         createTopologyGraph();
 
-        log.debug("The topology has been updated");
-      }
+        updateEdgeStatistics();
 
-      updateEdgeStatistics();
-      buildStandardCostMatrix();
-      buildRTPCostMatrix();
+        this.icmpSemaphore.tryAcquire();
+        this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+        this.icmpSemaphore.tryAcquire();
+
+        log.debug("The topology has been updated");
+
+      }else{
+        updateEdgeStatistics();
+
+        this.icmpSemaphore.tryAcquire();
+        this.icmpRouting.updateStandardCostMatrix(this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
+        this.icmpSemaphore.release();
+
+        buildRTPCostMatrix();
+      }
     }
 
 }
