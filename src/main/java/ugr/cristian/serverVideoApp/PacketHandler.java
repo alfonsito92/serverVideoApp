@@ -100,10 +100,6 @@ public class PacketHandler implements IListenDataPacket {
   private ConcurrentMap<Map<Node, InetAddress>, NodeConnector> tableIP = new ConcurrentHashMap<Map<Node, InetAddress>, NodeConnector>();
   private Map<Node, Set<Edge>> nodeEdges = new HashMap<Node, Set<Edge>>();
 
-  private ConcurrentMap<Map<Node, Node>, List<Edge>> rtpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
-
-  private ConcurrentMap<Map<Node, Node>, List<Edge>> icmpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
-
   private Edge edgeMatrix[][];
 
   private Long latencyMatrix[][];
@@ -114,22 +110,11 @@ public class PacketHandler implements IListenDataPacket {
   private Map<Edge, Set<Packet>> edgePackets = new HashMap<Edge, Set<Packet>>();
   private ConcurrentMap<Map<Edge, Packet>, Long> packetTime = new ConcurrentHashMap<Map<Edge, Packet>, Long>();
 
-  private Long standardCostMatrix[][];
-  private Long rtpCostMatrix[][];
-
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
-  private Map<Edge, Long> edgeCostMap = new HashMap<Edge, Long>();
-  private Map<Edge, Long> rtpEdgeCostMap = new HashMap<Edge, Long>();
-
-
-  private Transformer<Edge, ? extends Number> costTransformer = null;
-  private Transformer<Edge, ? extends Number> costRTPTransformer = null;
-
   private Graph<Node, Edge> g = new SparseMultigraph();
 
-  private DijkstraShortestPath<Node, Edge> standardShortestPath;
   private DijkstraShortestPath<Node, Edge> rtpShortestPath;
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
@@ -140,6 +125,7 @@ public class PacketHandler implements IListenDataPacket {
   private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
 
   private ICMPRouting icmpRouting = null;
+  private RTPRouting rtpRouting = null;
 
   /*********Statistics Constants**********/
 
@@ -155,30 +141,24 @@ public class PacketHandler implements IListenDataPacket {
   /***************************************/
 
   /*************************************/
-  private final Long defaultCost = 5L; //If we don't have any latency measure
-
   private int flood = 0;
 
   private int MAXFLOODPACKET = 5;
 
-  private final Integer rtpPort = 5004;
-  private final String RTPSTRING = "10000000";
-  private final Long RTPFACTOR = 1000L; //To get the difference in ms
-  private final Long RTPDEFAULTCOST = 30L;
-
   private final Integer audioPort = 2543;
 
   /*************************************/
-  private final Long UPDATETIME = 1000L;
+  private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
   private Long t1 = System.currentTimeMillis();
   private Long t2 = 0L;
   /*************************************/
 
-  /*************************************/
+  /*************************************/ //Semaphores to prevent conflicts between differents instancies of receiveDataPacket
   static final Semaphore semaphore=new Semaphore(1);
   static final Semaphore delFlowSemaphore = new Semaphore(1);
   static final Semaphore timeSemaphore = new Semaphore(1);
   static final Semaphore icmpSemaphore = new Semaphore(1);
+  static final Semaphore rtpSemaphore = new Semaphore(1);
   /************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -352,7 +332,7 @@ public class PacketHandler implements IListenDataPacket {
 
             byte[] udpRawPayload = udpDatagram.getRawPayload();
 
-            if(detectRTPPacket(udpRawPayload, dstPort)){
+            if(this.rtpRouting.detectRTPPacket(udpRawPayload, dstPort)){
               return handleRTPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B, dstPort);
             }
 
@@ -416,102 +396,6 @@ public class PacketHandler implements IListenDataPacket {
         }
 
       }
-    }
-
-    /**
-    *This function try to assing a cost for each Edge attending the latency and
-    *medium latency and other aspects like statistics
-    */
-
-    private void buildStandardCostMatrix(){
-      int l = this.nodeEdges.size();
-      int h = this.nodeEdges.size();
-      this.standardCostMatrix = new Long[l][h];
-      this.edgeCostMap.clear();
-
-      for(int i=0; i<l; i++){
-
-        for(int j=0; j<h; j++){
-
-          if(i==j){
-            this.standardCostMatrix[i][j]=0L;
-          }
-          else{
-            if(this.edgeMatrix[i][j]==null){
-              this.standardCostMatrix[i][j]=null;
-            }
-            else{
-              this.standardCostMatrix[i][j] = standardLatencyCost(this.edgeMatrix[i][j]) +
-              standardStatisticsMapCost(this.edgeMatrix[i][j])/10;
-            }
-          }
-          edgeCostMap.put(this.edgeMatrix[i][j], this.standardCostMatrix[i][j]);
-        }
-      }
-      buildTransformerMap(this.edgeCostMap);
-    }
-
-    /**
-    *This function try to assing a cost for each Edge attending The video factors
-    *which is different to Standard evaluation
-    */
-
-    private void buildRTPCostMatrix(){
-      int l = this.nodeEdges.size();
-      int h = this.nodeEdges.size();
-      this.rtpCostMatrix = new Long[l][h];
-      this.rtpEdgeCostMap.clear();
-
-      for(int i=0; i<l; i++){
-
-        for(int j=0; j<h; j++){
-
-          if(i==j){
-            this.rtpCostMatrix[i][j]=0L;
-          }
-          else if(this.edgeMatrix[i][j]==null){
-            this.rtpCostMatrix[i][j]=null;
-          }
-          else{
-
-            this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/RTPFACTOR +
-            rtpStatisticsCost(this.edgeMatrix[i][j])/10;
-          }
-
-          this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
-        }
-      }
-      buildRTPTransformerMap(this.rtpEdgeCostMap);
-    }
-
-    /**
-    *Function that is called when is necessary to build the transformer for Dijkstra
-    */
-
-    private void buildTransformerMap(final Map<Edge, Long> edgeCostMap2){
-
-      costTransformer = new Transformer<Edge, Long>(){
-        public Long transform(Edge e){
-
-          return edgeCostMap2.get(e);
-        }
-      };
-
-    }
-
-    /**
-    *Function that is called when is necessary to build the transformer rtp for Dijkstra
-    */
-
-    private void buildRTPTransformerMap(final Map<Edge, Long> rtpEdgeCostMap2){
-
-      this.costRTPTransformer = new Transformer<Edge, Long>(){
-        public Long transform(Edge e){
-
-          return rtpEdgeCostMap2.get(e);
-        }
-      };
-
     }
 
     /**
@@ -680,6 +564,7 @@ public class PacketHandler implements IListenDataPacket {
             flowsOnNode = statisticsManager.getFlows(tempNode);
           }
           catch(RuntimeException bad){
+            log.trace("No flows get, time to try in noCache flows");
             try{
               flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
             }
@@ -718,40 +603,6 @@ public class PacketHandler implements IListenDataPacket {
               }
 
           }
-      }
-      return result;
-    }
-
-
-    //-128, -95 are the number value of the two first packets rtp which combined with the destination port are enough to detect rtp packet and program flow
-
-    /*
-    Número de versión de RTP (V - versión number): 2 bits. La versión definida por la especificación actual es 2.
-    Relleno (P - Padding): 1 bit. Si el bit del relleno está activado, hay uno o más bytes al final del paquete que no es parte de la carga útil. El último byte del paquete indica el número de bytes de relleno. El relleno es usado por algunos algoritmos de cifrado.
-    La extensión (X - Extensión): 1 bit. Si el bit de extensión está activado, entonces el encabezado fijo es seguido por una extensión del encabezado. Este mecanismo de la extensión posibilita implementaciones para añadir información al encabezado RTP.
-    Conteo CSRC (CC): 4 bits. El número de identificadores CSRC que sigue el encabezado fijo. Si la cuenta CSRC es cero, entonces la fuente de sincronización es la fuente de la carga útil.
-    El marcador (M - Marker): 1 bit. Un bit de marcador definido por el perfil particular de media.
-    Tipo de Carga útil (PT - Payload Type): 7 bits. Un índice en una tabla del perfiles de media que describe el formato de carga útil. Los mapeos de carga útil para audio y vídeo están especificados en el RFC 1890.
-    */
-
-    /**
-    *Function that is called when is necessary to check if a Packet is RTP
-    *@param rawPayload The payload of the packet
-    *@param dstPort The dstPort for the packet
-    *@return True or false.
-    */
-
-    private boolean detectRTPPacket(byte[] rawPayload, int dstPort){
-      boolean result = false;
-
-      if(dstPort == rtpPort){
-        Byte temp = rawPayload[0];
-        String tempString = Integer.toBinaryString((temp & 0xFF) + 0x100).substring(1);
-
-        if(tempString.equals(RTPSTRING)){
-          result=true;
-        }
-
       }
       return result;
     }
@@ -951,12 +802,10 @@ public class PacketHandler implements IListenDataPacket {
           this.icmpSemaphore.release();
         }
         catch(RuntimeException badDijkstraICMP){
-          log.debug("Impossible to obtain the best Path, please update your topology");
+          log.info("Impossible to obtain the best Path, please update your topology (link s1 s2 down and up for example)");
           updateICMPGraph();
           return PacketResult.IGNORED;
         }
-
-
 
         if(definitivePath != null || definitivePath.isEmpty()){
 
@@ -1033,27 +882,19 @@ public class PacketHandler implements IListenDataPacket {
         Map<Node, Node> tempMap = new HashMap<Node, Node>();
 			  tempMap.put(tempSrcNode, tempDstNode);
 
-			  List<Edge> tempPath = new ArrayList<Edge>();
+			  List<Edge> definitivePath = new ArrayList<Edge>();
 
-
-        if(rtpPathMap.containsKey(tempMap)){
-				 tempPath = rtpPathMap.get(tempMap);
-			  }else{
-				 this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
-				 tempPath = rtpShortestPath.getPath(tempSrcNode, tempDstNode);
-				 rtpPathMap.put(tempMap, tempPath);
-			  }
-
-        List<Edge> definitivePath;
-
-        boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(tempSrcNode);
-
-        if(!temp){
-          definitivePath = reordenateList(tempPath, tempSrcNode, tempDstNode);
+        try{
+          this.icmpSemaphore.tryAcquire();
+          definitivePath = this.rtpRouting.getRTPShortestPath(tempSrcNode, tempDstNode);
+          this.icmpSemaphore.release();
         }
-        else{
-          definitivePath = tempPath;
+        catch(RuntimeException badDijkstraICMP){
+          log.info("Impossible to obtain the best Path, please update your topology (link s1 s2 down and up for example)");
+          updateRTPGraph();
+          return PacketResult.IGNORED;
         }
+
         if(definitivePath != null){
 
           egressConnector = installRTPListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
@@ -1661,191 +1502,6 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
-    *This function is called when is necessary evaluate the latencyMatrix for an edge and
-    *rtp protocol
-    *@param edge The edge
-    *@return The Long value after the process
-    */
-
-    private Long rtpLatencyCost(Edge edge){
-      int i = getNodeConnectorIndex(edge.getTailNodeConnector());
-      int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
-
-      Long ret1 = 0L;
-      Long ret2 = 0L;
-
-      Long cost = 0L;
-      if(latencyMatrix!=null){
-        Long temp1 = this.latencyMatrix[i][j];
-        Long temp2 = this.mediumLatencyMatrix[i][j];
-
-        if(temp1 == null){
-          ret1=RTPDEFAULTCOST;
-        }
-        if(temp2 == null){
-          ret2=RTPDEFAULTCOST;
-        }
-
-        if(temp1 != null && temp2 != null){
-          if(temp1>temp2){
-            cost = (temp1 - temp2)/2;
-          }
-          else if (temp2>temp1){
-            cost = (temp2 - temp1)/2;
-          }else{
-            cost = RTPDEFAULTCOST*2;
-          }
-        }
-      }
-      else{
-        ret1=RTPDEFAULTCOST;
-        ret2=RTPDEFAULTCOST;
-        cost=ret1+ret2;
-      }
-      return cost;
-    }
-
-    /**
-    *This function is called when is necessary evaluate the statisticsMap for an edge and
-    *rtp protocol
-    *@param edge The edge
-    *@return The Long value after the process
-    */
-
-    private Long rtpStatisticsCost(Edge edge){
-      Long cost = 0L;
-      Long temp1 = 0L;
-      Long temp2 = 0L;
-
-      ArrayList<Long> tempArray = new ArrayList<Long>();
-
-      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
-      for(int i=0; i<statisticsName.length; i++){
-        tempArray = tempStatistics.get(statisticsName[i]);
-
-        if(tempArray == null){
-
-          tempArray=new ArrayList<Long>();
-          tempArray.add(10L);
-          tempArray.add(10L);
-
-        }
-
-        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
-          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
-
-          Long tempMax = maxStatistics.get(statisticsName[i]);
-
-          if(tempMax == null){
-            tempMax = tempMedium;
-          }
-
-
-          if(tempMax/tempMedium > 9){
-            cost += 1L;
-          }
-          else{
-            cost += 10L - tempMax/tempMedium;
-          }
-        }
-        else{
-          cost += 1L;
-        }
-      }
-      return cost/5;
-    }
-
-    /**
-    *This function is called when is necessary evaluate the latencyMatrix for an edge
-    *@param edge The edge
-    *@return The Long value after the process
-    */
-
-    private Long standardLatencyCost(Edge edge){
-      int i = getNodeConnectorIndex(edge.getTailNodeConnector());
-      int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
-
-      Long ret1 = 0L;
-      Long ret2 = 0L;
-
-      Long cost;
-      if(latencyMatrix!=null){
-        Long temp = this.latencyMatrix[i][j];
-        Long temp2 = this.mediumLatencyMatrix[i][j];
-
-        if(temp == null){
-          ret1=defaultCost;
-        }
-        else{
-          ret1 = temp/minLatency;
-        }
-
-        if(temp2 == null){
-          ret2=defaultCost;
-        }
-        else{
-          ret2=temp2/minMediumLatency;
-        }
-      }
-      else{
-        ret1=defaultCost;
-        ret2=defaultCost;
-      }
-
-      cost = ret1/2 + ret2;
-      return cost;
-    }
-
-    /**
-    *This function is called when is necessary evaluate the statisticsMap for an edge
-    *@param edge The edge
-    *@return The Long value after the process
-    */
-
-    private Long standardStatisticsMapCost(Edge edge){
-      Long cost = 0L;
-      Long temp1 = 0L;
-      Long temp2 = 0L;
-
-      ArrayList<Long> tempArray = new ArrayList<Long>();
-
-      Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
-      for(int i=0; i<statisticsName.length; i++){
-        tempArray = tempStatistics.get(statisticsName[i]);
-
-        if(tempArray == null){
-
-          tempArray=new ArrayList<Long>();
-          tempArray.add(10L);
-          tempArray.add(10L);
-
-        }
-
-        if(tempArray.get(0)!=0 && tempArray.get(1) !=0 ){
-          Long tempMedium = (tempArray.get(0) + tempArray.get(1) )/ 2;
-
-          Long tempMax = maxStatistics.get(statisticsName[i]);
-
-          if(tempMax == null){
-            tempMax = tempMedium;
-          }
-
-
-          if(tempMax/tempMedium > 9){
-            cost += 1L;
-          }
-          else{
-            cost += 10L - tempMax/tempMedium;
-          }
-        }
-        else{
-          cost += 1L;
-        }
-      }
-      return cost/2;
-    }
-
-    /**
     *This function is called when is necessary to sum all the elements of a Array
     *@param array The array which will be sum
     *@return result The complete sum of the array
@@ -1898,6 +1554,33 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when is necessary update the statistics.
+    */
+
+    private void updateEdgeStatistics(){
+      this.edgeStatistics.clear();
+      Set<Node> tempNodes = this.nodeEdges.keySet();
+      for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
+        Node tempNode = it.next();
+        Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
+          for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
+            Edge tempEdge = it2.next();
+            putEdgeStatistics(tempEdge);
+          }
+      }
+
+    }
+
+    /**
+    *This function update the graph for ICMPRouting.
+    */
+
+    private void updateICMPGraph(){
+      createTopologyGraph();
+      this.icmpRouting.updateGraph(this.g);
+    }
+
+    /**
     *The follow function update the latencyMatrix for the position of the edge
     *@param edge The edge
     *@param t The latency time.
@@ -1939,30 +1622,12 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
-    *Function that is called when is necessary update the statistics.
+    *This function update the graph for RTPRouting.
     */
 
-    private void updateEdgeStatistics(){
-      this.edgeStatistics.clear();
-      Set<Node> tempNodes = this.nodeEdges.keySet();
-      for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
-        Node tempNode = it.next();
-        Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
-          for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
-            Edge tempEdge = it2.next();
-            putEdgeStatistics(tempEdge);
-          }
-      }
-
-    }
-
-    /**
-    *This function update the graph for ICMPRouting.
-    */
-
-    private void updateICMPGraph(){
+    private void updateRTPGraph(){
       createTopologyGraph();
-      this.icmpRouting.updateGraph(this.g);
+      this.rtpRouting.updateGraph(this.g);
     }
 
     /**
@@ -1979,8 +1644,7 @@ public class PacketHandler implements IListenDataPacket {
 
         this.packetTime.clear();
         this.edgePackets.clear();
-        this.rtpPathMap.clear();
-        this.icmpPathMap.clear();
+
         flood=0;
 
         if(this.nodeEdges!=null && edges!=null){
@@ -1999,9 +1663,14 @@ public class PacketHandler implements IListenDataPacket {
         this.icmpSemaphore.tryAcquire();
         this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
-        this.icmpSemaphore.tryAcquire();
+        this.icmpSemaphore.release();
 
-        log.debug("The topology has been updated");
+        this.rtpSemaphore.tryAcquire();
+        this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+        this.rtpSemaphore.release();
+
+        log.trace("The topology has been updated");
 
       }else{
         updateEdgeStatistics();
@@ -2011,7 +1680,11 @@ public class PacketHandler implements IListenDataPacket {
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
         this.icmpSemaphore.release();
 
-        buildRTPCostMatrix();
+        this.rtpSemaphore.tryAcquire();
+        this.rtpRouting.updateRTPCostMatrix(this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
+        this.rtpSemaphore.release();
+
       }
     }
 
