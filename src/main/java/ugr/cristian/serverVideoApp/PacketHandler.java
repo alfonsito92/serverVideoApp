@@ -636,8 +636,9 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
-    *The function is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
-    *The original code can be founded in
+    *The function is a modification of an another function. The original
+    *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be find in
     *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necessary flood a determinate packet for all the nodeConnector in a node
     *@param inPkt pakect that we have to flood
@@ -805,9 +806,14 @@ public class PacketHandler implements IListenDataPacket {
           this.icmpSemaphore.release();
         }
         catch(RuntimeException badDijkstraICMP){
-          log.info("Impossible to obtain the best Path, please update your topology (link s1 s2 down and up for example)");
-          updateICMPGraph();
-          return PacketResult.IGNORED;
+          log.info("Impossible to obtain the best Path.");
+          log.info("If the problem persist please update your topology (link s1 s2 down and up for example)");
+
+          this.icmpSemaphore.tryAcquire();
+          this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+          this.icmpSemaphore.release();
+          floodPacket(inPkt, node, ingressConnector);
         }
 
         if(definitivePath != null || definitivePath.isEmpty()){
@@ -893,8 +899,14 @@ public class PacketHandler implements IListenDataPacket {
           this.icmpSemaphore.release();
         }
         catch(RuntimeException badDijkstraICMP){
-          log.info("Impossible to obtain the best Path, please update your topology (link s1 s2 down and up for example)");
-          updateRTPGraph();
+          log.info("Impossible to obtain the best Path.");
+          log.info("If the problem persist please update your topology (link s1 s2 down and up for example)");
+
+          this.rtpSemaphore.tryAcquire();
+          this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+          this.rtpSemaphore.release();
+
           return PacketResult.IGNORED;
         }
 
@@ -1075,7 +1087,7 @@ public class PacketHandler implements IListenDataPacket {
     /**
     *The function is a modification of an another function. The original
     *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
-    *The original code can be founded in
+    *The original code can be find in
     *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necesarry to install a flow
     *All the flows will have two timeOut, idle and Hard.
@@ -1133,7 +1145,7 @@ public class PacketHandler implements IListenDataPacket {
     /**
     *The function is a modification of an another function. The original
     *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
-    *The original code can be founded in
+    *The original code can be find in
     *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
     *Function that is called when is necesarry to install a flow
     *All the flows will have two timeOut, idle and Hard.
@@ -1690,7 +1702,7 @@ public class PacketHandler implements IListenDataPacket {
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
         this.rtpSemaphore.release();
 
-        log.trace("The topology has been updated");
+        log.debug("The topology has been updated");
 
       }else{
         updateEdgeStatistics();
