@@ -113,6 +113,12 @@ public class PacketHandler implements IListenDataPacket {
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
+  private Map<Edge, Long> previousSentBytes = new HashMap<Edge, Long>();
+
+  private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
+  private Long minBandWith=0L;
+  private Map<Edge, Long> edgeMapTime = new HashMap<Edge, Long>();
+
   private Graph<Node, Edge> g = new SparseMultigraph();
 
   private DijkstraShortestPath<Node, Edge> rtpShortestPath;
@@ -126,6 +132,7 @@ public class PacketHandler implements IListenDataPacket {
 
   private ICMPRouting icmpRouting = null;
   private RTPRouting rtpRouting = null;
+  private AudioRouting audioRouting = null;
 
   /*********Statistics Constants**********/
 
@@ -145,12 +152,12 @@ public class PacketHandler implements IListenDataPacket {
 
   private int MAXFLOODPACKET = 5;
 
-  private final Integer audioPort = 2543;
-
   /*************************************/
   private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
   private Long t1 = System.currentTimeMillis();
   private Long t2 = 0L;
+  private Long statisticsT1 = 0L;
+  private Long statisticsT2 = 0L;
   /*************************************/
 
   /*************************************/ //Semaphores to prevent conflicts between differents instancies of receiveDataPacket
@@ -159,6 +166,8 @@ public class PacketHandler implements IListenDataPacket {
   static final Semaphore timeSemaphore = new Semaphore(1);
   static final Semaphore icmpSemaphore = new Semaphore(1);
   static final Semaphore rtpSemaphore = new Semaphore(1);
+  static final Semaphore statisticSemaphore = new Semaphore(1);
+  static final Semaphore audioSemaphore = new Semaphore(1);
   /************************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -236,9 +245,6 @@ public class PacketHandler implements IListenDataPacket {
     /**
      * Sets a reference to the requested StatisticsService
      */
-    /**
-     * Sets a reference to the requested StatisticsService
-     */
     void setStatisticsManagerService(IStatisticsManager s) {
         log.trace("Set StatisticsManagerService.");
 
@@ -279,9 +285,10 @@ public class PacketHandler implements IListenDataPacket {
     @Override
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
-      t2 = System.currentTimeMillis();
+
 
       timeSemaphore.tryAcquire();
+      t2 = System.currentTimeMillis();
       if((t2-t1) > UPDATETIME){
         updateTopology();
         t1 = System.currentTimeMillis();
@@ -335,13 +342,12 @@ public class PacketHandler implements IListenDataPacket {
             if(this.rtpRouting.detectRTPPacket(udpRawPayload, dstPort)){
               return handleRTPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B, dstPort);
             }
+            else if(this.audioRouting.detectAudioPacket(udpRawPayload, dstPort)){
+              return handleAudioPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B, dstPort);
+            }
 
           }else if(l4Datagram instanceof TCP){
-            TCP tcpDatagram = (TCP) l4Datagram;
-            int clientPort = tcpDatagram.getSourcePort();
-            int dstPort = tcpDatagram.getDestinationPort();
-
-            byte[] tcpRawPayload = tcpDatagram.getRawPayload();
+            return PacketResult.IGNORED;
           }
 
         }
@@ -492,6 +498,17 @@ public class PacketHandler implements IListenDataPacket {
 
       return false;
 
+    }
+
+    /**
+    *This function compare the actual bandWith with the max
+    *@param bandWith The actual BW
+    */
+
+    private void compareminBandWith(Long bandWith){
+      if(bandWith<minBandWith){
+        minBandWith=bandWith;
+      }
     }
 
     /**Function that is called when is necessary to compare the statistics
@@ -770,6 +787,90 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when a Audio Packet needs to be Handled
+    *@param inPKt The received Packet
+    *@param srcAddr The src IP Address
+    *@param srcMAC_B The src MAC Address in bytes
+    *@param ingressConnector The connector where the packet came
+    *@param node The node where the packet have been received
+    *@param dstAddr The dst IP Address
+    *@param dstMAC_B The dst MAC Address in bytes
+    *@param dstPort The audio dstPort that identify the protocol
+    *@return result The result of handle the audio Packet
+    */
+
+    private PacketResult handleAudioPacket(RawPacket inPkt, InetAddress srcAddr, byte[] srcMAC_B,
+    NodeConnector ingressConnector, Node node, InetAddress dstAddr, byte[] dstMAC_B, int dstPort){
+
+      Packet pkt = dataPacketService.decodeDataPacket(inPkt);
+      NodeConnector egressConnector=null;
+      PacketResult result = null;
+
+      if(flood<MAXFLOODPACKET){
+        this.flood++;
+        floodPacket(inPkt, node, ingressConnector);
+      }else{
+
+        NodeConnector tempSrcConnector = findHost(srcAddr);
+        Node tempSrcNode = tempSrcConnector.getNode();
+        NodeConnector tempDstConnector = findHost(dstAddr);
+        Node tempDstNode = tempDstConnector.getNode();
+
+        Map<Node, Node> tempMap = new HashMap<Node, Node>();
+			  tempMap.put(tempSrcNode, tempDstNode);
+
+			  List<Edge> definitivePath = new ArrayList<Edge>();
+
+        try{
+          this.audioSemaphore.tryAcquire();
+          definitivePath = this.audioRouting.getAudioShortestPath(tempSrcNode, tempDstNode);
+          this.rtpSemaphore.release();
+        }
+
+        catch(RuntimeException badDijkstraAudio){
+          log.info("Impossible to obtain the best Path.");
+          log.info("If the problem persist please update your topology (link s1 s2 down and up for example)");
+
+          this.audioSemaphore.tryAcquire();
+          this.audioRouting = new AudioRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+          this.audioSemaphore.release();
+
+          return PacketResult.IGNORED;
+        }
+
+        if(definitivePath != null){
+
+          egressConnector = installAudioListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+          tempSrcConnector, tempDstConnector, dstPort);
+
+
+          if(!hasHostConnected(egressConnector)){
+            Edge downEdge = getDownEdge(node, egressConnector);
+            if(downEdge!= null){
+              putPacket(downEdge, pkt);
+            }
+          }
+
+          if(egressConnector!= null){
+          //Send the packet for the selected Port.
+            inPkt.setOutgoingNodeConnector(egressConnector);
+            this.dataPacketService.transmitDataPacket(inPkt);
+          }else{
+            floodPacket(inPkt, node, ingressConnector);
+          }
+          result = PacketResult.CONSUME;
+
+        }else{
+          log.trace("Destination host is unrecheable!");
+          result = PacketResult.IGNORED;
+        }
+      }
+
+      return result;
+    }
+
+    /**
     *Function that is called when a ICMP Packet needs to be Handled
     *@param inPKt The received Packet
     *@param srcAddr The src IP Address
@@ -894,17 +995,17 @@ public class PacketHandler implements IListenDataPacket {
 			  List<Edge> definitivePath = new ArrayList<Edge>();
 
         try{
-          this.icmpSemaphore.tryAcquire();
+          this.rtpSemaphore.tryAcquire();
           definitivePath = this.rtpRouting.getRTPShortestPath(tempSrcNode, tempDstNode);
-          this.icmpSemaphore.release();
+          this.rtpSemaphore.release();
         }
-        catch(RuntimeException badDijkstraICMP){
+        catch(RuntimeException badDijkstraRTP){
           log.info("Impossible to obtain the best Path.");
           log.info("If the problem persist please update your topology (link s1 s2 down and up for example)");
 
           this.rtpSemaphore.tryAcquire();
           this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
           this.rtpSemaphore.release();
 
           return PacketResult.IGNORED;
@@ -959,6 +1060,65 @@ public class PacketHandler implements IListenDataPacket {
       }
 
     }
+
+    /**
+    *Function that is called when is necesarry to install a List of flows
+    *All the flows will have two timeOut, idle and Hard.
+    *@param path The Edge List
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param node The node where we have to return the egressConnector
+    *@param srcConnector The Connector src
+    *@param dstConnector The Connector dst
+    *@param dstPort The rtp destination Port
+    *@return The NodeConnector for the node
+    */
+
+    private NodeConnector installAudioListFlows(List<Edge> path, InetAddress srcAddr, byte[] srcMAC_B,
+    InetAddress dstAddr, byte[] dstMAC_B, Node node, NodeConnector srcConnector, NodeConnector dstConnector, int dstPort){
+      NodeConnector result = null;
+      for(int i=0; i<path.size();i++){
+        Edge tempEdge = path.get(i);
+        NodeConnector tempConnector = tempEdge.getTailNodeConnector();
+        Node tempNode = tempConnector.getNode();
+        if(tempNode.equals(node)){
+          result = tempConnector;
+        }
+
+        if(programAudioFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, tempConnector, tempNode, dstPort) ){
+
+          log.trace("Flow installed on " + node + " in the port " + tempConnector);
+
+        }
+        else{
+          log.trace("Error trying to install the flow");
+        }
+
+        if(i == path.size()-1){
+          NodeConnector lastConnector = findHost(dstAddr);
+          Node lastNode = lastConnector.getNode();
+
+
+            if(programRTPFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, lastConnector, lastNode, dstPort) ){
+
+              log.trace("Flow installed on " + lastNode + " in the port " + lastConnector);
+
+            }
+            else{
+              log.trace("Error trying to install the flow");
+            }
+
+        }
+
+      }
+
+      ///////////////////////The dst node will have a flow for the IP
+
+      return result;
+    }
+
 
     /**
     *Function that is called when is necesarry to install a List of flows
@@ -1155,6 +1315,63 @@ public class PacketHandler implements IListenDataPacket {
     *@param dstMAC_B The dstMACAddress in byte format
     *@param outConnector The dstConnector that will install on the node
     *@param node The node where the flow will be installed
+    *@param dstPort The destination Port for Audio Packet
+    */
+
+    synchronized private boolean programAudioFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
+    byte[] dstMAC_B, NodeConnector outConnector, Node node, int dstPort) {
+
+        Match match = new Match();
+        match.setField(MatchType.DL_TYPE, (short) 0x0800);  // IPv4 ethertype
+        match.setField(MatchType.NW_SRC, srcAddr);
+        match.setField(MatchType.NW_DST, dstAddr);
+        match.setField(MatchType.DL_SRC, srcMAC_B);
+        match.setField(MatchType.DL_DST, dstMAC_B);
+        match.setField(MatchType.TP_DST, (short) dstPort);
+        match.setField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+
+        List<Action> actions = new ArrayList<Action>();
+        actions.add(new Output(outConnector));
+
+        Flow f = new Flow(match, actions);
+
+        // Create the flow
+        Flow flow = new Flow(match, actions);
+
+        // Use FlowProgrammerService to program flow.
+        try{
+          semaphore.tryAcquire();
+          Status status = flowProgrammerService.addFlowAsync(node, flow);
+          semaphore.release();
+
+          if (!status.isSuccess()) {
+              log.trace("Could not program flow: " + status.getDescription());
+              return false;
+          }
+          else{
+          return true;
+          }
+        }
+        catch(RuntimeException unexpectError){
+          log.trace("Error trying to install the flow");
+          return false;
+        }
+
+    }
+
+    /**
+    *The function is a modification of an another function. The original
+    *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be find in
+    *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
+    *Function that is called when is necesarry to install a flow
+    *All the flows will have two timeOut, idle and Hard.
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param outConnector The dstConnector that will install on the node
+    *@param node The node where the flow will be installed
     *@param dstPort The destination Port for RTP Packet
     */
 
@@ -1251,6 +1468,43 @@ public class PacketHandler implements IListenDataPacket {
 
       tempMap.put(receiveBytes, tempArray);
       //////////////////////////////////
+      statisticSemaphore.tryAcquire();
+      statisticsT2 = System.currentTimeMillis();
+      statisticSemaphore.release();
+
+      statisticSemaphore.tryAcquire();
+      statisticsT1 = edgeMapTime.get(edge);
+      statisticSemaphore.release();
+
+      Long previousB = previousSentBytes.get(edge);
+      previousSentBytes.remove(edge);
+
+      Long tempBW = minBandWith;
+
+      if(statisticsT1 != null && statisticsT2 != null){
+        if(previousB == null){
+          if(statisticsT2 > statisticsT1){
+            tempBW = ((m1 + m2)/2)/(statisticsT2 - statisticsT1);
+          }
+        }else{
+          if(statisticsT2 > statisticsT1){
+            tempBW = ((m1+m2)/2 - previousB)/(statisticsT2 - statisticsT1);
+          }
+        }
+      }
+
+      statisticSemaphore.tryAcquire();
+      statisticsT1 = System.currentTimeMillis();
+      statisticSemaphore.release();
+
+      previousSentBytes.put(edge, (m1+m2)/2);
+      compareminBandWith(tempBW);
+      this.edgeBandWith.remove(edge);
+      this.edgeMapTime.remove(edge);
+      this.edgeBandWith.put(edge, tempBW);
+      this.edgeMapTime.put(edge, statisticsT2);
+
+      //////////////////////////////////////
       tempArray=new ArrayList<Long>();
       m1=headStatistics.getTransmitDropCount();
       m2=tailStatistics.getTransmitDropCount();
@@ -1597,8 +1851,9 @@ public class PacketHandler implements IListenDataPacket {
         Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
           for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
             Edge tempEdge = it2.next();
-            putEdgeStatistics(tempEdge);
+              putEdgeStatistics(tempEdge);
           }
+
       }
 
     }
@@ -1676,7 +1931,9 @@ public class PacketHandler implements IListenDataPacket {
 
         this.packetTime.clear();
         this.edgePackets.clear();
-
+        this.edgeBandWith.clear();
+        this.minBandWith=0L;
+        this.edgeMapTime.clear();
         flood=0;
 
         if(this.nodeEdges!=null && edges!=null){
@@ -1686,6 +1943,7 @@ public class PacketHandler implements IListenDataPacket {
 
         this.nodeEdges = edges;
         buildEdgeMatrix(edges);
+
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
@@ -1699,8 +1957,13 @@ public class PacketHandler implements IListenDataPacket {
 
         this.rtpSemaphore.tryAcquire();
         this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
         this.rtpSemaphore.release();
+
+        this.audioSemaphore.tryAcquire();
+        this.audioRouting = new AudioRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+        this.audioSemaphore.release();
 
         log.debug("The topology has been updated");
 
@@ -1714,8 +1977,13 @@ public class PacketHandler implements IListenDataPacket {
 
         this.rtpSemaphore.tryAcquire();
         this.rtpRouting.updateRTPCostMatrix(this.latencyMatrix, this.minLatency,
-        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
         this.rtpSemaphore.release();
+
+        this.audioSemaphore.tryAcquire();
+        this.audioRouting.updateAudioCostMatrix(this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
+        this.audioSemaphore.release();
 
       }
     }

@@ -85,7 +85,7 @@ import org.apache.commons.collections15.Transformer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class RTPRouting {
+public class AudioRouting {
 
 	private static final Logger log = LoggerFactory.getLogger(PacketHandler.class);
 
@@ -98,20 +98,20 @@ public class RTPRouting {
 		private Long mediumLatencyMatrix[][];
 		private Long minMediumLatency;
 
-		private Long rtpCostMatrix[][];
+		private Long audioCostMatrix[][];
 
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
-		private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
+		private Map<Edge, Long> audioEdgeCostMap = new HashMap<Edge, Long>();
+
+    private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
 		private Long minBandWith;
 
-		private Map<Edge, Long> rtpEdgeCostMap = new HashMap<Edge, Long>();
-
-		private Transformer<Edge, ? extends Number> costRTPTransformer = null;
+		private Transformer<Edge, ? extends Number> costAudioTransformer = null;
 
 		private Graph<Node, Edge> g = new SparseMultigraph();
-		private DijkstraShortestPath<Node, Edge> rtpShortestPath;
+		private DijkstraShortestPath<Node, Edge> audioShortestPath;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> pathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
@@ -128,17 +128,16 @@ public class RTPRouting {
 
 		/***************************************/
 
-		private final Integer rtpPort = 5004;
-		private final Integer VERSION = 2;
-		private final Integer M2PAYLOADTYPE = 33; //MPEG2
-	  private final Long RTPFACTOR = 1000L; //To get the difference in ms
-	  private final Long RTPDEFAULTCOST = 30L;
-		private final Long DEFAULTBWCOST = 10L;
+		private final Integer audioPort = 1992;
+	  //private final String RTPSTRING = "10000000";
+	  private final Long AUDIOFACTOR = 1000L; //To get the difference in ms
+	  private final Long AUDIODEFAULTCOST = 30L;
+    private final Long DEFAULTBWCOST = 10L;
 		/****************************************/
 		public boolean needUpdate = false;
 
 		/**
-		*Constructor for RTPHandler class
+		*Constructor for AUDIOHandler class
 		*@param nodes The nodeEdges map
 		*@param edges The edgeMatrix
 		*@param latencies The latencyMatrix
@@ -148,11 +147,11 @@ public class RTPRouting {
 		*@param statistics The edgeStatisticsMap
 		*@param max The maximum statistics
 		*@param grapho The topology Graph
-		*@param bw The edge BandWith Map
-		*@param minBW The minBW
+    *@param bw The edge BandWith Map
+    *@param minBW The minBW
 		*/
 
-		public RTPRouting(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public AudioRouting(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Graph<Node, Edge> grapho, Map<Edge, Long> bw, Long minBW){
 
 			this.nodeEdges = nodes;
@@ -163,12 +162,11 @@ public class RTPRouting {
 			this.minMediumLatency = medLatency;
 			this.edgeStatistics = statistics;
 			this.maxStatistics = max;
-			this.edgeBandWith = bw;
+      this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
 			this.g = grapho;
-
-			buildRTPCostMatrix();
+			buildAudioCostMatrix();
 
 		}
 
@@ -184,51 +182,67 @@ public class RTPRouting {
 	    return addr;
 	  }
 
+    /**
+		*This function return the cost for the BandWith of a Edge
+		*@param edge The edge
+		*@return result The Long value after evaluation
+		*/
+
+		private Long audioBandWithCost(Edge edge){
+			Long edgeBW = this.edgeBandWith.get(edge);
+			Long result = DEFAULTBWCOST;
+
+			if(edgeBW != null && edgeBW != 0L){
+				result = edgeBW / minBandWith;
+			}
+			return result;
+		}
+
 		/**
 	  *This function try to assing a cost for each Edge attending The video factors
 	  *which is different to Standard evaluation
 	  */
 
-	  private void buildRTPCostMatrix(){
+	  private void buildAudioCostMatrix(){
 	    int l = this.nodeEdges.size();
 	    int h = this.nodeEdges.size();
-	    this.rtpCostMatrix = new Long[l][h];
-	    this.rtpEdgeCostMap.clear();
+	    this.audioCostMatrix = new Long[l][h];
+	    this.audioEdgeCostMap.clear();
 
 	    for(int i=0; i<l; i++){
 
 	      for(int j=0; j<h; j++){
 
 	        if(i==j){
-	          this.rtpCostMatrix[i][j]=0L;
+	          this.audioCostMatrix[i][j]=0L;
 	        }
 	        else if(this.edgeMatrix[i][j]==null){
-	          this.rtpCostMatrix[i][j]=null;
+	          this.audioCostMatrix[i][j]=null;
 	        }
 	        else{
 
-	          this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/RTPFACTOR +
-	          rtpStatisticsCost(this.edgeMatrix[i][j])/10 + rtpBandWithCost(this.edgeMatrix[i][j]);
+	          this.audioCostMatrix[i][j] = audioLatencyCost(this.edgeMatrix[i][j])/AUDIOFACTOR +
+	          audioStatisticsCost(this.edgeMatrix[i][j])/10+audioBandWithCost(this.edgeMatrix[i][j]);
 	        }
 
-	        this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
+	        this.audioEdgeCostMap.put(this.edgeMatrix[i][j], this.audioCostMatrix[i][j]);
 	      }
 	    }
 
-	    buildRTPTransformerMap(this.rtpEdgeCostMap);
+	    buildAudioTransformerMap(this.audioEdgeCostMap);
 
 	  }
 
 		/**
-	  *Function that is called when is necessary to build the transformer rtp for Dijkstra
+	  *Function that is called when is necessary to build the transformer audio for Dijkstra
 	  */
 
-	  private void buildRTPTransformerMap(final Map<Edge, Long> rtpEdgeCostMap2){
+	  private void buildAudioTransformerMap(final Map<Edge, Long> audioEdgeCostMap2){
 
-	    this.costRTPTransformer = new Transformer<Edge, Long>(){
+	    this.costAudioTransformer = new Transformer<Edge, Long>(){
 	      public Long transform(Edge e){
 
-	        return rtpEdgeCostMap2.get(e);
+	        return audioEdgeCostMap2.get(e);
 	      }
 	    };
 
@@ -343,12 +357,12 @@ public class RTPRouting {
 
 		/**
     *This function is called when is necessary evaluate the latencyMatrix for an edge and
-    *rtp protocol
+    *audio protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long rtpLatencyCost(Edge edge){
+    private Long audioLatencyCost(Edge edge){
       int i = getNodeConnectorIndex(edge.getTailNodeConnector());
       int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
@@ -361,26 +375,19 @@ public class RTPRouting {
         Long temp2 = this.mediumLatencyMatrix[i][j];
 
         if(temp1 == null){
-          ret1=RTPDEFAULTCOST;
+          ret1=AUDIODEFAULTCOST;
         }
         if(temp2 == null){
-          ret2=RTPDEFAULTCOST;
+          ret2=AUDIODEFAULTCOST;
         }
 
         if(temp1 != null && temp2 != null){
-          if(temp1>temp2){
-            cost = (temp1 - temp2)/2;
-          }
-          else if (temp2>temp1){
-            cost = (temp2 - temp1)/2;
-          }else{
-            cost = RTPDEFAULTCOST*2;
-          }
+          cost=temp1*4;
         }
       }
       else{
-        ret1=RTPDEFAULTCOST;
-        ret2=RTPDEFAULTCOST;
+        ret1=AUDIODEFAULTCOST;
+        ret2=AUDIODEFAULTCOST;
         cost=ret1+ret2;
       }
       return cost;
@@ -388,12 +395,12 @@ public class RTPRouting {
 
 		/**
     *This function is called when is necessary evaluate the statisticsMap for an edge and
-    *rtp protocol
+    *audio protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long rtpStatisticsCost(Edge edge){
+    private Long audioStatisticsCost(Edge edge){
       Long cost = 0L;
       Long temp1 = 0L;
       Long temp2 = 0L;
@@ -436,54 +443,7 @@ public class RTPRouting {
       return cost/5;
     }
 
-		/**
-		*This function return the cost for the BandWith of a Edge
-		*@param edge The edge
-		*@return result The Long value after evaluation
-		*/
-
-		private Long rtpBandWithCost(Edge edge){
-			Long edgeBW = this.edgeBandWith.get(edge);
-			Long result = DEFAULTBWCOST;
-
-			if(edgeBW != null && edgeBW != 0L){
-				result = edgeBW / minBandWith;
-			}
-			return result;
-		}
-
-		/**
-		*Function that is called when we pretend to show in log all the elements of a Matrix
-		*@matrix[][] The matrix
-		*/
-
-		private void traceLongMatrix(Long matrix[][]){
-
-			for(int i=0; i<matrix.length; i++){
-				for(int j=0; j<matrix[i].length; j++){
-
-					log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
-
-				}
-			}
-
-		}
 		/******************************PUBLIC METHODS*****************************
-
-		//-128, -95 are the number value of the two first packets rtp which combined with the destination port are enough to detect rtp packet and program flow
-
-		//H263 es dinámico y está entre los asignar (del 77 al 95) asumimos 95
-
-		//https://www.ietf.org/rfc/rfc3551.txt
-
-    /*
-    Número de versión de RTP (V - versión number): 2 bits. La versión definida por la especificación actual es 2.
-    Relleno (P - Padding): 1 bit. Si el bit del relleno está activado, hay uno o más bytes al final del paquete que no es parte de la carga útil. El último byte del paquete indica el número de bytes de relleno. El relleno es usado por algunos algoritmos de cifrado.
-    La extensión (X - Extensión): 1 bit. Si el bit de extensión está activado, entonces el encabezado fijo es seguido por una extensión del encabezado. Este mecanismo de la extensión posibilita implementaciones para añadir información al encabezado RTP.
-    Conteo CSRC (CC): 4 bits. El número de identificadores CSRC que sigue el encabezado fijo. Si la cuenta CSRC es cero, entonces la fuente de sincronización es la fuente de la carga útil.
-    El marcador (M - Marker): 1 bit. Un bit de marcador definido por el perfil particular de media.
-    Tipo de Carga útil (PT - Payload Type): 7 bits. Un índice en una tabla del perfiles de media que describe el formato de carga útil. Los mapeos de carga útil para audio y vídeo están especificados en el RFC 1890.
-    */
 
     /**
     *Function that is called when is necessary to check if a Packet is RTP
@@ -492,23 +452,12 @@ public class RTPRouting {
     *@return True or false.
     */
 
-    public boolean detectRTPPacket(byte[] rawPayload, int dstPort){
+    public boolean detectAudioPacket(byte[] rawPayload, int dstPort){
       boolean result = false;
 
-      if(dstPort == rtpPort){
-        Byte temp = rawPayload[0];
-				Integer tempVersion = (Integer)(temp & 0xC0)>>6;
-
-				Byte temp2 = rawPayload[1];
-				Integer tempType = (Integer)(temp2 & 0x7F);
-
-        if(tempVersion == VERSION){
-					if(tempType == M2PAYLOADTYPE){
-						result=true;
-					}
-        }
+      if(dstPort == audioPort){
+        return true;
       }
-
       return result;
     }
 
@@ -519,7 +468,7 @@ public class RTPRouting {
 		*@return result The resultan path
 		*/
 
-		public List<Edge> getRTPShortestPath(Node srcNode, Node dstNode){
+		public List<Edge> getAudioShortestPath(Node srcNode, Node dstNode){
 
 			if(this.g == null || this.g.getEdgeCount() == 0){
 				needUpdate = true;
@@ -534,8 +483,8 @@ public class RTPRouting {
 			if(pathMap.containsKey(tempMap)){
 				tempPath = pathMap.get(tempMap);
 			}else{
-				this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
-				tempPath = rtpShortestPath.getPath(srcNode, dstNode);
+				this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
+				tempPath = audioShortestPath.getPath(srcNode, dstNode);
 				pathMap.put(tempMap, tempPath);
 			}
 
@@ -569,11 +518,11 @@ public class RTPRouting {
 		*@param medLatency The min mediumLatency value
 		*@param statistics The edgeStatisticsMap
 		*@param max The maximum statistics
-		*@param bw The edge BandWith Map
-		*@param minBW The minBW
+    *@param bw The edge BandWith Map
+    *@param minBW The minBW
 		*/
 
-		public void updateRTPCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public void updateAudioCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Map<Edge, Long> bw, Long minBW){
 
 			this.latencyMatrix = latencies;
@@ -582,10 +531,11 @@ public class RTPRouting {
 			this.minMediumLatency = medLatency;
 			this.edgeStatistics = statistics;
 			this.maxStatistics = max;
-			this.edgeBandWith = bw;
+      this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
-			buildRTPCostMatrix();
+			buildAudioCostMatrix();
 
 		}
-}
+
+  }

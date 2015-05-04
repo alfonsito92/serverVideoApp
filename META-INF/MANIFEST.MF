@@ -1,6 +1,6 @@
 Manifest-Version: 1.0
-Bnd-LastModified: 1429254621948
-Build-Jdk: 1.7.0_75
+Bnd-LastModified: 1430772591592
+Build-Jdk: 1.7.0_79
 Built-By: cristian
 Bundle-Activator: ugr.cristian.serverVideoApp.Activator
 Bundle-ManifestVersion: 2
