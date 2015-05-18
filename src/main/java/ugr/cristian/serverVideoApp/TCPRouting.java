@@ -85,7 +85,7 @@ import org.apache.commons.collections15.Transformer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class AudioRouting {
+public class TCPRouting {
 
 	private static final Logger log = LoggerFactory.getLogger(PacketHandler.class);
 
@@ -98,20 +98,20 @@ public class AudioRouting {
 		private Long mediumLatencyMatrix[][];
 		private Long minMediumLatency;
 
-		private Long audioCostMatrix[][];
+		private Long tcpCostMatrix[][];
 
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
-		private Map<Edge, Long> audioEdgeCostMap = new HashMap<Edge, Long>();
-
-    private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
+		private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
 		private Long minBandWith;
 
-		private Transformer<Edge, ? extends Number> costAudioTransformer = null;
+		private Map<Edge, Long> tcpEdgeCostMap = new HashMap<Edge, Long>();
+
+		private Transformer<Edge, ? extends Number> costTCPTransformer = null;
 
 		private Graph<Node, Edge> g = new SparseMultigraph();
-		private DijkstraShortestPath<Node, Edge> audioShortestPath;
+		private DijkstraShortestPath<Node, Edge> tcpShortestPath;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> pathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
@@ -127,18 +127,14 @@ public class AudioRouting {
 		receiveDropBytes, transmitErrorBytes, receiveErrorBytes};
 
 		/***************************************/
-
-		private final Integer audioPort = 1992;
-		private final Integer VERSION = 2;
-		private final Integer PAYLOADTYPE = 33; //MPEG2
-	  private final Long AUDIOFACTOR = 1000L; //To get the difference in ms
-	  private final Long AUDIODEFAULTCOST = 30L;
-    private final Long DEFAULTBWCOST = 10L;
+	  private final Long TCPFACTOR = 1000L; //To get the difference in ms
+	  private final Long TCPDEFAULTCOST = 30L;
+		private final Long DEFAULTBWCOST = 10L;
 		/****************************************/
 		public boolean needUpdate = false;
 
 		/**
-		*Constructor for AUDIOHandler class
+		*Constructor for RTPHandler class
 		*@param nodes The nodeEdges map
 		*@param edges The edgeMatrix
 		*@param latencies The latencyMatrix
@@ -148,11 +144,11 @@ public class AudioRouting {
 		*@param statistics The edgeStatisticsMap
 		*@param max The maximum statistics
 		*@param grapho The topology Graph
-    *@param bw The edge BandWith Map
-    *@param minBW The minBW
+		*@param bw The edge BandWith Map
+		*@param minBW The minBW
 		*/
 
-		public AudioRouting(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public TCPRouting(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Graph<Node, Edge> grapho, Map<Edge, Long> bw, Long minBW){
 
 			this.nodeEdges = nodes;
@@ -163,11 +159,12 @@ public class AudioRouting {
 			this.minMediumLatency = medLatency;
 			this.edgeStatistics = statistics;
 			this.maxStatistics = max;
-      this.edgeBandWith = bw;
+			this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
 			this.g = grapho;
-			buildAudioCostMatrix();
+
+			buildTCPCostMatrix();
 
 		}
 
@@ -183,67 +180,51 @@ public class AudioRouting {
 	    return addr;
 	  }
 
-    /**
-		*This function return the cost for the BandWith of a Edge
-		*@param edge The edge
-		*@return result The Long value after evaluation
-		*/
-
-		private Long audioBandWithCost(Edge edge){
-			Long edgeBW = this.edgeBandWith.get(edge);
-			Long result = DEFAULTBWCOST;
-
-			if(edgeBW != null && edgeBW != 0L){
-				result = edgeBW / minBandWith;
-			}
-			return result;
-		}
-
 		/**
 	  *This function try to assing a cost for each Edge attending The video factors
 	  *which is different to Standard evaluation
 	  */
 
-	  private void buildAudioCostMatrix(){
+	  private void buildTCPCostMatrix(){
 	    int l = this.nodeEdges.size();
 	    int h = this.nodeEdges.size();
-	    this.audioCostMatrix = new Long[l][h];
-	    this.audioEdgeCostMap.clear();
+	    this.tcpCostMatrix = new Long[l][h];
+	    this.tcpEdgeCostMap.clear();
 
 	    for(int i=0; i<l; i++){
 
 	      for(int j=0; j<h; j++){
 
 	        if(i==j){
-	          this.audioCostMatrix[i][j]=0L;
+	          this.tcpCostMatrix[i][j]=0L;
 	        }
 	        else if(this.edgeMatrix[i][j]==null){
-	          this.audioCostMatrix[i][j]=null;
+	          this.tcpCostMatrix[i][j]=null;
 	        }
 	        else{
 
-	          this.audioCostMatrix[i][j] = audioLatencyCost(this.edgeMatrix[i][j])/AUDIOFACTOR +
-	          audioStatisticsCost(this.edgeMatrix[i][j])/10+audioBandWithCost(this.edgeMatrix[i][j]);
+	          this.tcpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/TCPFACTOR +
+	          rtpStatisticsCost(this.edgeMatrix[i][j])/10 + rtpBandWithCost(this.edgeMatrix[i][j]);
 	        }
 
-	        this.audioEdgeCostMap.put(this.edgeMatrix[i][j], this.audioCostMatrix[i][j]);
+	        this.tcpEdgeCostMap.put(this.edgeMatrix[i][j], this.tcpCostMatrix[i][j]);
 	      }
 	    }
 
-	    buildAudioTransformerMap(this.audioEdgeCostMap);
+	    buildRTPTransformerMap(this.tcpEdgeCostMap);
 
 	  }
 
 		/**
-	  *Function that is called when is necessary to build the transformer audio for Dijkstra
+	  *Function that is called when is necessary to build the transformer rtp for Dijkstra
 	  */
 
-	  private void buildAudioTransformerMap(final Map<Edge, Long> audioEdgeCostMap2){
+	  private void buildRTPTransformerMap(final Map<Edge, Long> tcpEdgeCostMap2){
 
-	    this.costAudioTransformer = new Transformer<Edge, Long>(){
+	    this.costTCPTransformer = new Transformer<Edge, Long>(){
 	      public Long transform(Edge e){
 
-	        return audioEdgeCostMap2.get(e);
+	        return tcpEdgeCostMap2.get(e);
 	      }
 	    };
 
@@ -358,12 +339,12 @@ public class AudioRouting {
 
 		/**
     *This function is called when is necessary evaluate the latencyMatrix for an edge and
-    *audio protocol
+    *rtp protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long audioLatencyCost(Edge edge){
+    private Long rtpLatencyCost(Edge edge){
       int i = getNodeConnectorIndex(edge.getTailNodeConnector());
       int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
@@ -376,19 +357,26 @@ public class AudioRouting {
         Long temp2 = this.mediumLatencyMatrix[i][j];
 
         if(temp1 == null){
-          ret1=AUDIODEFAULTCOST;
+          ret1=TCPDEFAULTCOST;
         }
         if(temp2 == null){
-          ret2=AUDIODEFAULTCOST;
+          ret2=TCPDEFAULTCOST;
         }
 
         if(temp1 != null && temp2 != null){
-          cost=temp1*4;
+          if(temp1>temp2){
+            cost = (temp1 - temp2)/2;
+          }
+          else if (temp2>temp1){
+            cost = (temp2 - temp1)/2;
+          }else{
+            cost = TCPDEFAULTCOST*2;
+          }
         }
       }
       else{
-        ret1=AUDIODEFAULTCOST;
-        ret2=AUDIODEFAULTCOST;
+        ret1=TCPDEFAULTCOST;
+        ret2=TCPDEFAULTCOST;
         cost=ret1+ret2;
       }
       return cost;
@@ -396,12 +384,12 @@ public class AudioRouting {
 
 		/**
     *This function is called when is necessary evaluate the statisticsMap for an edge and
-    *audio protocol
+    *rtp protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long audioStatisticsCost(Edge edge){
+    private Long rtpStatisticsCost(Edge edge){
       Long cost = 0L;
       Long temp1 = 0L;
       Long temp2 = 0L;
@@ -444,24 +432,39 @@ public class AudioRouting {
       return cost/5;
     }
 
+		/**
+		*This function return the cost for the BandWith of a Edge
+		*@param edge The edge
+		*@return result The Long value after evaluation
+		*/
+
+		private Long rtpBandWithCost(Edge edge){
+			Long edgeBW = this.edgeBandWith.get(edge);
+			Long result = DEFAULTBWCOST;
+
+			if(edgeBW != null && edgeBW != 0L){
+				result = edgeBW / minBandWith;
+			}
+			return result;
+		}
+
+		/**
+		*Function that is called when we pretend to show in log all the elements of a Matrix
+		*@matrix[][] The matrix
+		*/
+
+		private void traceLongMatrix(Long matrix[][]){
+
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix[i].length; j++){
+
+					log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+				}
+			}
+
+		}
 		/******************************PUBLIC METHODS*****************************
-
-    /**
-    *Function that is called when is necessary to check if a Packet is RTP
-    *@param rawPayload The payload of the packet
-    *@param dstPort The dstPort for the packet
-    *@return True or false.
-    */
-
-    public boolean detectAudioPacket(byte[] rawPayload, int dstPort){
-      boolean result = false;
-
-      if(dstPort == audioPort){
-        return true;
-      }
-      return result;
-    }
-
 		/**
 		*This fucntion is called when is necessary get the best path between two nodes
 		*@param srcNode The srcNode
@@ -469,7 +472,7 @@ public class AudioRouting {
 		*@return result The resultan path
 		*/
 
-		public List<Edge> getAudioShortestPath(Node srcNode, Node dstNode){
+		public List<Edge> getTCPShortestPath(Node srcNode, Node dstNode){
 
 			if(this.g == null || this.g.getEdgeCount() == 0){
 				needUpdate = true;
@@ -484,8 +487,8 @@ public class AudioRouting {
 			if(pathMap.containsKey(tempMap)){
 				tempPath = pathMap.get(tempMap);
 			}else{
-				this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
-				tempPath = audioShortestPath.getPath(srcNode, dstNode);
+				this.tcpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTCPTransformer);
+				tempPath = tcpShortestPath.getPath(srcNode, dstNode);
 				pathMap.put(tempMap, tempPath);
 			}
 
@@ -519,11 +522,11 @@ public class AudioRouting {
 		*@param medLatency The min mediumLatency value
 		*@param statistics The edgeStatisticsMap
 		*@param max The maximum statistics
-    *@param bw The edge BandWith Map
-    *@param minBW The minBW
+		*@param bw The edge BandWith Map
+		*@param minBW The minBW
 		*/
 
-		public void updateAudioCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public void updateTCPCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Map<Edge, Long> bw, Long minBW){
 
 			this.latencyMatrix = latencies;
@@ -532,11 +535,10 @@ public class AudioRouting {
 			this.minMediumLatency = medLatency;
 			this.edgeStatistics = statistics;
 			this.maxStatistics = max;
-      this.edgeBandWith = bw;
+			this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
-			buildAudioCostMatrix();
+			buildTCPCostMatrix();
 
 		}
-
-  }
+}

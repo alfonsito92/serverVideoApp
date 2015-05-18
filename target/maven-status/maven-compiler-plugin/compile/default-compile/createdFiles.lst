@@ -3,6 +3,8 @@ ugr/cristian/serverVideoApp/AudioRouting$1.class
 ugr/cristian/serverVideoApp/Activator.class
 ugr/cristian/serverVideoApp/RTPRouting.class
 ugr/cristian/serverVideoApp/PacketHandler.class
+ugr/cristian/serverVideoApp/TCPRouting.class
 ugr/cristian/serverVideoApp/ICMPRouting.class
 ugr/cristian/serverVideoApp/ICMPRouting$1.class
+ugr/cristian/serverVideoApp/TCPRouting$1.class
 ugr/cristian/serverVideoApp/RTPRouting$1.class

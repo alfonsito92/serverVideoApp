@@ -412,7 +412,11 @@ public class ICMPRouting {
   }
 
 
-  /******************************PUBLIC METHODS*****************************
+  /******************************PUBLIC METHODS*****************************/
+
+  public void prueba(ISwitchManager a, Node b){
+    log.info("prueba: "+a.getUpNodeConnectors(b));
+  }
 
 	/**
 	*This fucntion is called when is necessary get the best path between two nodes

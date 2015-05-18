@@ -133,6 +133,7 @@ public class PacketHandler implements IListenDataPacket {
   private ICMPRouting icmpRouting = null;
   private RTPRouting rtpRouting = null;
   private AudioRouting audioRouting = null;
+  private TCPRouting tcpRouting = null;
 
   /*********Statistics Constants**********/
 
@@ -153,7 +154,7 @@ public class PacketHandler implements IListenDataPacket {
   private int MAXFLOODPACKET = 5;
 
   /*************************************/
-  private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
+  private final Long UPDATETIME = 100L; //The time Interval to check the topology in milliseconds.
   private Long t1 = System.currentTimeMillis();
   private Long t2 = 0L;
   private Long statisticsT1 = 0L;
@@ -168,7 +169,12 @@ public class PacketHandler implements IListenDataPacket {
   static final Semaphore rtpSemaphore = new Semaphore(1);
   static final Semaphore statisticSemaphore = new Semaphore(1);
   static final Semaphore audioSemaphore = new Semaphore(1);
+  static final Semaphore tcpSemaphore = new Semaphore(1);
   /************************************/
+
+  /***********************************/
+  static final Integer CLEANMETHOD = 2; //The options are COMPLETE(1) (remove all the flows), MINIMUN(2) (remove only the affected flows)
+  /*********************************/
 
   static private InetAddress intToInetAddress(int i) {
     byte b[] = new byte[] { (byte) ((i>>24)&0xff), (byte) ((i>>16)&0xff), (byte) ((i>>8)&0xff), (byte) (i&0xff) };
@@ -347,7 +353,11 @@ public class PacketHandler implements IListenDataPacket {
             }
 
           }else if(l4Datagram instanceof TCP){
-            return PacketResult.IGNORED;
+            TCP tcpDatagram = (TCP) l4Datagram;
+            int clientPort = tcpDatagram.getSourcePort();
+            int dstPort = tcpDatagram.getDestinationPort();
+
+            return handleTCPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B, dstPort);
           }
 
         }
@@ -960,6 +970,89 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *Function that is called when a TCP Packet needs to be Handled
+    *@param inPKt The received Packet
+    *@param srcAddr The src IP Address
+    *@param srcMAC_B The src MAC Address in bytes
+    *@param ingressConnector The connector where the packet came
+    *@param node The node where the packet have been received
+    *@param dstAddr The dst IP Address
+    *@param dstMAC_B The dst MAC Address in bytes
+    *@param dstPort The dstPort
+    *@return result The result of handle the RTP Packet
+    */
+
+    private PacketResult handleTCPPacket(RawPacket inPkt, InetAddress srcAddr, byte[] srcMAC_B,
+    NodeConnector ingressConnector, Node node, InetAddress dstAddr, byte[] dstMAC_B, int dstPort){
+
+      Packet pkt = dataPacketService.decodeDataPacket(inPkt);
+      NodeConnector egressConnector=null;
+      PacketResult result = null;
+
+      if(flood<MAXFLOODPACKET){
+        this.flood++;
+        floodPacket(inPkt, node, ingressConnector);
+      }else{
+
+        NodeConnector tempSrcConnector = findHost(srcAddr);
+        Node tempSrcNode = tempSrcConnector.getNode();
+        NodeConnector tempDstConnector = findHost(dstAddr);
+        Node tempDstNode = tempDstConnector.getNode();
+
+        Map<Node, Node> tempMap = new HashMap<Node, Node>();
+			  tempMap.put(tempSrcNode, tempDstNode);
+
+			  List<Edge> definitivePath = new ArrayList<Edge>();
+
+        try{
+          this.tcpSemaphore.tryAcquire();
+          definitivePath = this.tcpRouting.getTCPShortestPath(tempSrcNode, tempDstNode);
+          this.tcpSemaphore.release();
+        }
+        catch(RuntimeException badDijkstraTCP){
+          log.info("Impossible to obtain the best Path.");
+          log.info("If the problem persist please update your topology (link s1 s2 down and up for example)");
+
+          this.tcpSemaphore.tryAcquire();
+          this.tcpRouting = new TCPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+          this.tcpSemaphore.release();
+
+          return PacketResult.IGNORED;
+        }
+
+        if(definitivePath != null){
+
+          egressConnector = installTCPListFlows(definitivePath, srcAddr, srcMAC_B, dstAddr, dstMAC_B, node,
+          tempSrcConnector, tempDstConnector, dstPort);
+
+
+          if(!hasHostConnected(egressConnector)){
+            Edge downEdge = getDownEdge(node, egressConnector);
+            if(downEdge!= null){
+              putPacket(downEdge, pkt);
+            }
+          }
+
+          if(egressConnector!= null){
+          //Send the packet for the selected Port.
+            inPkt.setOutgoingNodeConnector(egressConnector);
+            this.dataPacketService.transmitDataPacket(inPkt);
+          }else{
+            floodPacket(inPkt, node, ingressConnector);
+          }
+          result = PacketResult.CONSUME;
+
+        }else{
+          log.trace("Destination host is unrecheable!");
+          result = PacketResult.IGNORED;
+        }
+      }
+
+      return result;
+    }
+
+    /**
     *Function that is called when a RTP Packet needs to be Handled
     *@param inPKt The received Packet
     *@param srcAddr The src IP Address
@@ -1184,6 +1277,64 @@ public class PacketHandler implements IListenDataPacket {
     *@return The NodeConnector for the node
     */
 
+    private NodeConnector installTCPListFlows(List<Edge> path, InetAddress srcAddr, byte[] srcMAC_B,
+    InetAddress dstAddr, byte[] dstMAC_B, Node node, NodeConnector srcConnector, NodeConnector dstConnector, int dstPort){
+      NodeConnector result = null;
+      for(int i=0; i<path.size();i++){
+        Edge tempEdge = path.get(i);
+        NodeConnector tempConnector = tempEdge.getTailNodeConnector();
+        Node tempNode = tempConnector.getNode();
+        if(tempNode.equals(node)){
+          result = tempConnector;
+        }
+
+        if(programTCPFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, tempConnector, tempNode, dstPort) ){
+
+          log.trace("Flow installed on " + node + " in the port " + tempConnector);
+
+        }
+        else{
+          log.trace("Error trying to install the flow");
+        }
+
+        if(i == path.size()-1){
+          NodeConnector lastConnector = findHost(dstAddr);
+          Node lastNode = lastConnector.getNode();
+
+
+            if(programTCPFlow( srcAddr, srcMAC_B, dstAddr, dstMAC_B, lastConnector, lastNode, dstPort) ){
+
+              log.trace("Flow installed on " + lastNode + " in the port " + lastConnector);
+
+            }
+            else{
+              log.trace("Error trying to install the flow");
+            }
+
+        }
+
+      }
+
+      ///////////////////////The dst node will have a flow for the IP
+
+      return result;
+    }
+
+    /**
+    *Function that is called when is necesarry to install a List of flows
+    *All the flows will have two timeOut, idle and Hard.
+    *@param path The Edge List
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param node The node where we have to return the egressConnector
+    *@param srcConnector The Connector src
+    *@param dstConnector The Connector dst
+    *@param dstPort The rtp destination Port
+    *@return The NodeConnector for the node
+    */
+
     private NodeConnector installRTPListFlows(List<Edge> path, InetAddress srcAddr, byte[] srcMAC_B,
     InetAddress dstAddr, byte[] dstMAC_B, Node node, NodeConnector srcConnector, NodeConnector dstConnector, int dstPort){
       NodeConnector result = null;
@@ -1329,6 +1480,62 @@ public class PacketHandler implements IListenDataPacket {
         match.setField(MatchType.DL_DST, dstMAC_B);
         match.setField(MatchType.TP_DST, (short) dstPort);
         match.setField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+
+        List<Action> actions = new ArrayList<Action>();
+        actions.add(new Output(outConnector));
+
+        Flow f = new Flow(match, actions);
+
+        // Create the flow
+        Flow flow = new Flow(match, actions);
+
+        // Use FlowProgrammerService to program flow.
+        try{
+          semaphore.tryAcquire();
+          Status status = flowProgrammerService.addFlowAsync(node, flow);
+          semaphore.release();
+
+          if (!status.isSuccess()) {
+              log.trace("Could not program flow: " + status.getDescription());
+              return false;
+          }
+          else{
+          return true;
+          }
+        }
+        catch(RuntimeException unexpectError){
+          log.trace("Error trying to install the flow");
+          return false;
+        }
+
+    }
+
+    /**
+    *The function is a modification of an another function. The original
+    *is property of SDNHUB.org and it's used under a GPLv3 License. All the credits for SDNHUB.org
+    *The original code can be find in
+    *https://github.com/sdnhub/SDNHub_Opendaylight_Tutorial/blob/master/adsal_L2_forwarding/src/main/java/org/opendaylight/tutorial/tutorial_L2_forwarding/internal/TutorialL2Forwarding.java
+    *Function that is called when is necesarry to install a flow
+    *All the flows will have two timeOut, idle and Hard.
+    *@param srcAddr The source IPv4 Address
+    *@param srcMAC_B The srcMACAddress in byte format
+    *@param dstAddr The destination IPV4 Address
+    *@param dstMAC_B The dstMACAddress in byte format
+    *@param outConnector The dstConnector that will install on the node
+    *@param node The node where the flow will be installed
+    */
+
+    synchronized private boolean programTCPFlow(InetAddress srcAddr, byte[] srcMAC_B, InetAddress dstAddr,
+    byte[] dstMAC_B, NodeConnector outConnector, Node node, int dstPort) {
+
+        Match match = new Match();
+        match.setField(MatchType.DL_TYPE, (short) 0x0800);  // IPv4 ethertype
+        match.setField(MatchType.NW_SRC, srcAddr);
+        match.setField(MatchType.NW_DST, dstAddr);
+        match.setField(MatchType.DL_SRC, srcMAC_B);
+        match.setField(MatchType.DL_DST, dstMAC_B);
+        match.setField(MatchType.TP_DST, (short) dstPort);
+        match.setField(MatchType.NW_PROTO, IPProtocols.TCP.byteValue());
 
         List<Action> actions = new ArrayList<Action>();
         actions.add(new Output(outConnector));
@@ -1600,43 +1807,38 @@ public class PacketHandler implements IListenDataPacket {
       Set<Node> nodes = edges.keySet();
 
       for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
-
         Node tempNode = it.next();
-        Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
-        Set<Edge> tempEdgesNew = edges.get(tempNode);
+        switch(CLEANMETHOD){
 
-        if(tempEdgesOld!=null && tempEdgesNew!=null){
-
-          if(tempEdgesNew.size() < tempEdgesOld.size()){
-
-            for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
-              boolean success = false;
-              Edge tempEdge = it2.next();
-
-              if(!tempEdgesNew.contains(tempEdge)){
-                log.trace("The edge "+tempEdge+ " in the node "+tempNode+" is down now");
-
-                delFlow(tempEdge, tempNode);
-
-
-            }
-
+          case 1:
+          delFlowSemaphore.tryAcquire();
+          Status status=flowProgrammerService.removeAllFlows(tempNode);
+          delFlowSemaphore.release();
+          if(!status.isSuccess()){
+            log.info("Impossible to remove the flows on the node "+tempNode);
           }
-        }
-          /*
-          else if(tempEdgesNew.size() > tempEdgesOld.size()){
-            for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+          break;
 
-              Edge tempEdge = it2.next();
+          case 2:
+            Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
+            Set<Edge> tempEdgesNew = edges.get(tempNode);
+            if(tempEdgesOld!=null && tempEdgesNew!=null){
 
-              if(!tempEdgesOld.contains(tempEdge)){
-                log.debug("The edge "+tempEdge+ " in the node "+tempNode+" is a new Edge");
-                delFlow(tempEdge, tempNode);
+              if(tempEdgesNew.size() < tempEdgesOld.size()){
 
+                for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+                  boolean success = false;
+                  Edge tempEdge = it2.next();
+
+                  if(!tempEdgesNew.contains(tempEdge)){
+                    log.trace("The edge "+tempEdge+ " in the node "+tempNode+" is down now");
+                    //Implementar la función que recorre caminos.
+                    delFlow(tempEdge, tempNode);
+                  }
+                }
               }
             }
-          }
-          */
+          break;
         }
       }
     }
@@ -1652,99 +1854,6 @@ public class PacketHandler implements IListenDataPacket {
       Map<Edge, Packet> temp = new HashMap<Edge, Packet>();
       temp.put(edge, packet);
       this.packetTime.remove(temp);
-
-    }
-
-    /**
-    *This function reordenate a Edge<List> to put in the correct order.
-    *@param path The List<Edge>
-    *@param srcNode The first Node
-    *@param dstNode The last Node
-    *@return The definitive List<Edge>
-    */
-
-    private List<Edge> reordenateList(List<Edge> path, Node srcNode, Node dstNode){
-      boolean orden = true;
-      boolean orientacion = true;
-
-      List<Edge> result = new ArrayList();
-      List<Edge> definitivePath = new ArrayList();
-
-      if(path.get(0).getTailNodeConnector().getNode().equals(srcNode)){
-        orden=true;
-        orientacion=true;
-      }
-      else if(path.get(0).getHeadNodeConnector().getNode().equals(srcNode)){
-        orden=true;
-        orientacion=false;
-      }
-      else if(path.get(path.size()-1).getTailNodeConnector().getNode().equals(srcNode)){
-        orden=false;
-        orientacion=true;
-      }
-      else if(path.get(path.size()-1).getHeadNodeConnector().getNode().equals(srcNode)){
-        orden=false;
-        orientacion=false;
-      }
-
-      int i=0;
-      int n1=0;
-      int n2=0;
-
-      if(!orden){
-        i=path.size()-1;
-      }
-      int index;
-      for(int j=0; j<path.size();j++){
-
-        if(!orden){
-          index=i-j;
-        }
-        else{
-          index=j;
-        }
-
-        Edge tempEdge = path.get(index);
-
-        if(!orientacion){
-          n1=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
-          n2=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
-        }else{
-          n1=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
-          n2=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
-        }
-        result.add(this.edgeMatrix[n1][n2]);
-      }
-
-      ////////////////////////
-      //Better reordenating
-      ///////////////////////
-
-      definitivePath.add(result.get(0));
-
-
-      for(int j=1; j<result.size(); j++){
-
-        Edge tempEdge2 = result.get(j);
-        Edge tempEdge1 = result.get(j-1);
-
-        Node tempNode1 = tempEdge1.getHeadNodeConnector().getNode();
-        Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
-
-        Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
-
-
-        if(tempNode1.equals(tempNode2)){
-          definitivePath.add(result.get(j));
-        }else if(tempNode1.equals(tempNodeAux)){
-          int aux1 = getNodeConnectorIndex(tempEdge2.getHeadNodeConnector());
-          int aux2 = getNodeConnectorIndex(tempEdge2.getTailNodeConnector());
-
-          definitivePath.add(this.edgeMatrix[aux1][aux2]);
-        }
-      }
-
-      return definitivePath;
 
     }
 
@@ -1955,6 +2064,11 @@ public class PacketHandler implements IListenDataPacket {
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
         this.icmpSemaphore.release();
 
+        this.tcpSemaphore.tryAcquire();
+        this.tcpRouting = new TCPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+        this.tcpSemaphore.release();
+
         this.rtpSemaphore.tryAcquire();
         this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
@@ -1975,6 +2089,12 @@ public class PacketHandler implements IListenDataPacket {
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
         this.icmpSemaphore.release();
 
+        this.tcpSemaphore.tryAcquire();
+        this.tcpRouting.updateTCPCostMatrix(this.latencyMatrix, this.minLatency,
+        this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
+        this.tcpSemaphore.release();
+
+
         this.rtpSemaphore.tryAcquire();
         this.rtpRouting.updateRTPCostMatrix(this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
@@ -1986,6 +2106,7 @@ public class PacketHandler implements IListenDataPacket {
         this.audioSemaphore.release();
 
       }
+
     }
 
 }
