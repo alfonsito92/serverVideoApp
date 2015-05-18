@@ -57,6 +57,7 @@ import org.opendaylight.controller.sal.core.NodeConnector;
 import org.opendaylight.controller.sal.flowprogrammer.Flow;
 import org.opendaylight.controller.sal.flowprogrammer.IFlowProgrammerService;
 import org.opendaylight.controller.sal.match.Match;
+import org.opendaylight.controller.sal.match.MatchField;
 import org.opendaylight.controller.sal.match.MatchType;
 import org.opendaylight.controller.sal.packet.BitBufferHelper;
 import org.opendaylight.controller.sal.packet.Ethernet;
@@ -414,10 +415,6 @@ public class ICMPRouting {
 
   /******************************PUBLIC METHODS*****************************/
 
-  public void prueba(ISwitchManager a, Node b){
-    log.info("prueba: "+a.getUpNodeConnectors(b));
-  }
-
 	/**
 	*This fucntion is called when is necessary get the best path between two nodes
 	*@param srcNode The srcNode
@@ -457,6 +454,104 @@ public class ICMPRouting {
 		return definitivePath;
 
 	}
+
+  /**
+  *This function del old ICMP flows when an Edge is down
+  *@param edge The Edge which is down now
+  *@param flowProgrammer The service which enable the posibility to del or install flows
+  *@param statisticsManager The statistics manager to obtain the flows on a Node.
+  */
+
+  public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+    Set<Map<Node, Node>> tempMaps = icmpPathMap.keySet();
+    for(Iterator it = tempMaps.iterator(); it.hasNext();){
+      Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
+      List<Edge> tempPath = icmpPathMap.get(tempMap);
+
+      if(tempPath.contains(edge)){
+        icmpPathMap.remove(tempMap);
+
+        for(int i=0; i<tempPath.size(); i++){
+          Edge tempEdge = tempPath.get(i);
+          Node tempNode = tempEdge.getTailNodeConnector().getNode();
+
+          List<FlowOnNode> flowsOnNode = new ArrayList();
+
+          try{
+            flowsOnNode = statisticsManager.getFlows(tempNode);
+          }
+          catch(RuntimeException bad){
+            log.trace("No flows get, time to try in noCache flows");
+            try{
+              flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+            }
+            catch(RuntimeException veryBad){
+              log.trace("Impossible to obtain the flows");
+            }
+          }
+
+          for(int j = 0; j<flowsOnNode.size(); j++){
+            FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+            Flow tempFlow = tempFlowOnNode.getFlow();
+
+            if(tempFlow!=null){
+              MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+              MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+
+              if(tempField.equals(tempField2)){
+                try{
+                  log.trace("Trying removing "+tempFlow+" on "+tempNode);
+                  flowProgrammerService.removeFlow(tempNode, tempFlow);
+                }
+                catch(RuntimeException e8){
+                  log.trace("Error removing flow");
+                }
+              }
+            }
+          }
+        }
+        for(int i=0; i<tempPath.size(); i++){
+          Edge tempEdge = tempPath.get(i);
+          Node tempNode = tempEdge.getHeadNodeConnector().getNode();
+
+          List<FlowOnNode> flowsOnNode = new ArrayList();
+
+          try{
+            flowsOnNode = statisticsManager.getFlows(tempNode);
+          }
+          catch(RuntimeException bad){
+            log.trace("No flows get, time to try in noCache flows");
+            try{
+              flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+            }
+            catch(RuntimeException veryBad){
+              log.trace("Impossible to obtain the flows");
+            }
+          }
+
+          for(int j = 0; j<flowsOnNode.size(); j++){
+            FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+            Flow tempFlow = tempFlowOnNode.getFlow();
+
+            if(tempFlow!=null){
+              MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+              MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+
+              if(tempField.equals(tempField2)){
+                try{
+                  log.trace("Trying removing "+tempFlow+" on "+tempNode);
+                  flowProgrammerService.removeFlow(tempNode, tempFlow);
+                }
+                catch(RuntimeException e8){
+                  log.trace("Error removing flow");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
 	/**
 	*Function that is called when is necessary to update the rtpCostMartix
