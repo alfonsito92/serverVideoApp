@@ -511,10 +511,11 @@ public class AudioRouting {
 		*@param statisticsManager The statistics manager to obtain the flows on a Node.
 		*/
 
-		public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+		public boolean removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
 			Set<Map<Node, Node>> tempMaps = audioPathMap.keySet();
-
+			boolean result = false;
 			if(tempMaps.isEmpty()){
+				result = true;
 				Set<Node> nodes = this.nodeEdges.keySet();
 
 				for(Iterator it = nodes.iterator(); it.hasNext();){
@@ -651,6 +652,7 @@ public class AudioRouting {
 					}
 				}
 			}
+			return result;
 		}
 
 

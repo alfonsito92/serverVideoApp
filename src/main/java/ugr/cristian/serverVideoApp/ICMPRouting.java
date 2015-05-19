@@ -460,12 +460,14 @@ public class ICMPRouting {
   *@param edge The Edge which is down now
   *@param flowProgrammer The service which enable the posibility to del or install flows
   *@param statisticsManager The statistics manager to obtain the flows on a Node.
+  *@param result false if del only the flows selected
   */
 
-  public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+  public boolean removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
     Set<Map<Node, Node>> tempMaps = icmpPathMap.keySet();
-
+    boolean result = false;
     if(tempMaps.isEmpty()){
+      result = true;
       Set<Node> nodes = this.nodeEdges.keySet();
 
       for(Iterator it = nodes.iterator(); it.hasNext();){
@@ -508,6 +510,7 @@ public class ICMPRouting {
       }
     }
     else{
+      result = false;
       for(Iterator it = tempMaps.iterator(); it.hasNext();){
         Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
         List<Edge> tempPath = icmpPathMap.get(tempMap);
@@ -595,6 +598,7 @@ public class ICMPRouting {
         }
       }
     }
+    return result;
   }
 
 

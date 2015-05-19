@@ -1834,19 +1834,19 @@ public class PacketHandler implements IListenDataPacket {
                     log.trace("The edge "+tempEdge+ " in the node "+tempNode+" is down now");
 
                     this.icmpSemaphore.tryAcquire();
-                    icmpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
+                    first = icmpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.icmpSemaphore.release();
 
                     this.tcpSemaphore.tryAcquire();
-                    //tcpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
+                    first = tcpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.tcpSemaphore.release();
 
                     this.rtpSemaphore.tryAcquire();
-                    rtpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
+                    first = rtpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.rtpSemaphore.release();
 
                     this.audioSemaphore.tryAcquire();
-                    //audioRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
+                    first = audioRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.audioSemaphore.release();
 
                   }

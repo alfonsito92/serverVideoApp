@@ -514,10 +514,11 @@ public class TCPRouting {
 		*@param statisticsManager The statistics manager to obtain the flows on a Node.
 		*/
 
-		public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+		public boolean removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
 			Set<Map<Node, Node>> tempMaps = tcpPathMap.keySet();
-
+		  boolean result = false;
 			if(tempMaps.isEmpty()){
+				result = true;
 				Set<Node> nodes = this.nodeEdges.keySet();
 
 				for(Iterator it = nodes.iterator(); it.hasNext();){
@@ -647,6 +648,7 @@ public class TCPRouting {
 					}
 				}
 			}
+			return result;
 		}
 
 
