@@ -549,13 +549,12 @@ public class RTPRouting {
       else{
         definitivePath = tempPath;
       }
-
   		return definitivePath;
 
 		}
 
 		/**
-		*This function del old ICMP flows when an Edge is down
+		*This function del old RTP flows when an Edge is down
 		*@param edge The Edge which is down now
 		*@param flowProgrammer The service which enable the posibility to del or install flows
 		*@param statisticsManager The statistics manager to obtain the flows on a Node.
@@ -563,91 +562,137 @@ public class RTPRouting {
 
 		public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
 			Set<Map<Node, Node>> tempMaps = rtpPathMap.keySet();
-			for(Iterator it = tempMaps.iterator(); it.hasNext();){
-				Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
-				List<Edge> tempPath = rtpPathMap.get(tempMap);
 
-				if(tempPath.contains(edge)){
-					rtpPathMap.remove(tempMap);
+			if(tempMaps.isEmpty()){
+				Set<Node> nodes = this.nodeEdges.keySet();
 
-					for(int i=0; i<tempPath.size(); i++){
-						Edge tempEdge = tempPath.get(i);
-						Node tempNode = tempEdge.getTailNodeConnector().getNode();
+				for(Iterator it = nodes.iterator(); it.hasNext();){
+					Node tempNode = (Node)it.next();
 
-						List<FlowOnNode> flowsOnNode = new ArrayList();
+					List<FlowOnNode> flowsOnNode = new ArrayList();
 
+					try{
+						flowsOnNode = statisticsManager.getFlows(tempNode);
+					}
+					catch(RuntimeException bad){
+						log.trace("No flows get, time to try in noCache flows");
 						try{
-							flowsOnNode = statisticsManager.getFlows(tempNode);
+							flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
 						}
-						catch(RuntimeException bad){
-							log.trace("No flows get, time to try in noCache flows");
-							try{
-								flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
-							}
-							catch(RuntimeException veryBad){
-								log.trace("Impossible to obtain the flows");
-							}
+						catch(RuntimeException veryBad){
+							log.trace("Impossible to obtain the flows");
 						}
+					}
 
-						for(int j = 0; j<flowsOnNode.size(); j++){
-							FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
-							Flow tempFlow = tempFlowOnNode.getFlow();
+					for(int j = 0; j<flowsOnNode.size(); j++){
+						FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+						Flow tempFlow = tempFlowOnNode.getFlow();
 
-							if(tempFlow!=null){
-								MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
-								MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
-								MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
-								MatchField tempField4 = new MatchField(MatchType.TP_DST, rtpPort.shortValue());
+						if(tempFlow!=null){
+							MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+							MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+							MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+							MatchField tempField4 = new MatchField(MatchType.TP_DST, rtpPort.shortValue());
 
-								if(tempField.equals(tempField2)&& tempField3.equals(tempField4)){
-									try{
-										log.trace("Trying removing "+tempFlow+" on "+tempNode);
-										flowProgrammerService.removeFlow(tempNode, tempFlow);
-									}
-									catch(RuntimeException e8){
-										log.trace("Error removing flow");
-									}
+							if(tempField.equals(tempField2)&& tempField3.equals(tempField4)){
+								try{
+									log.trace("Trying removing "+tempFlow+" on "+tempNode);
+									flowProgrammerService.removeFlow(tempNode, tempFlow);
+								}
+								catch(RuntimeException e8){
+									log.trace("Error removing flow");
 								}
 							}
 						}
 					}
-					for(int i=0; i<tempPath.size(); i++){
-						Edge tempEdge = tempPath.get(i);
-						Node tempNode = tempEdge.getHeadNodeConnector().getNode();
+				}
+			}
+			else{
+				for(Iterator it = tempMaps.iterator(); it.hasNext();){
+					Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
+					List<Edge> tempPath = rtpPathMap.get(tempMap);
 
-						List<FlowOnNode> flowsOnNode = new ArrayList();
+					if(tempPath.contains(edge)){
 
-						try{
-							flowsOnNode = statisticsManager.getFlows(tempNode);
-						}
-						catch(RuntimeException bad){
-							log.trace("No flows get, time to try in noCache flows");
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getTailNodeConnector().getNode();
+
+							List<FlowOnNode> flowsOnNode = new ArrayList();
+
 							try{
-								flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								flowsOnNode = statisticsManager.getFlows(tempNode);
 							}
-							catch(RuntimeException veryBad){
-								log.trace("Impossible to obtain the flows");
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+									MatchField tempField4 = new MatchField(MatchType.TP_DST, rtpPort.shortValue());
+
+									if(tempField.equals(tempField2)&& tempField3.equals(tempField4)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
+									}
+								}
 							}
 						}
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getHeadNodeConnector().getNode();
 
-						for(int j = 0; j<flowsOnNode.size(); j++){
-							FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
-							Flow tempFlow = tempFlowOnNode.getFlow();
+							List<FlowOnNode> flowsOnNode = new ArrayList();
 
-							if(tempFlow!=null){
-								MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
-								MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
-								MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
-								MatchField tempField4 = new MatchField(MatchType.TP_DST, rtpPort.shortValue());
+							try{
+								flowsOnNode = statisticsManager.getFlows(tempNode);
+							}
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+									MatchField tempField4 = new MatchField(MatchType.TP_DST, rtpPort.shortValue());
 
 
-								if(tempField.equals(tempField2) && tempField3.equals(tempField4)){
-									try{
-										log.trace("Trying removing "+tempFlow+" on "+tempNode);
-										flowProgrammerService.removeFlow(tempNode, tempFlow);
-									}
-									catch(RuntimeException e8){
-										log.trace("Error removing flow");
+									if(tempField.equals(tempField2) && tempField3.equals(tempField4)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
 									}
 								}
 							}

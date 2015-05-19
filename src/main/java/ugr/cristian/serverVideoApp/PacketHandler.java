@@ -174,6 +174,7 @@ public class PacketHandler implements IListenDataPacket {
 
   /***********************************/
   static final Integer CLEANMETHOD = 2; //The options are COMPLETE(1) (remove all the flows), MINIMUN(2) (remove only the affected flows)
+  private boolean first = true;
   /*********************************/
 
   static private InetAddress intToInetAddress(int i) {
@@ -374,6 +375,7 @@ public class PacketHandler implements IListenDataPacket {
     public void init() {
         log.debug("Routing init() is called");
         this.nodeEdges=new HashMap<Node, Set<Edge>>();
+        first=true;
         updateTopology();
 
     }
@@ -1825,7 +1827,6 @@ public class PacketHandler implements IListenDataPacket {
             if(tempEdgesOld!=null && tempEdgesNew!=null){
 
               if(tempEdgesNew.size() < tempEdgesOld.size()){
-
                 for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
                   Edge tempEdge = it2.next();
 
@@ -1841,16 +1842,19 @@ public class PacketHandler implements IListenDataPacket {
                     this.tcpSemaphore.release();
 
                     this.rtpSemaphore.tryAcquire();
-                    //rtpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
+                    rtpRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.rtpSemaphore.release();
 
                     this.audioSemaphore.tryAcquire();
                     //audioRouting.removeFlows(tempEdge, flowProgrammerService, statisticsManager);
                     this.audioSemaphore.release();
+
                   }
                 }
+                first=true;
               }
             }
+
           break;
         }
       }
@@ -1878,6 +1882,32 @@ public class PacketHandler implements IListenDataPacket {
       this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
       this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
       initializeEdgeMediumTime();
+    }
+
+    /**
+    *This function reset the routing protocols
+    */
+
+    private void resetRoutingProtocols(){
+      this.icmpSemaphore.tryAcquire();
+      this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
+      this.icmpSemaphore.release();
+
+      this.tcpSemaphore.tryAcquire();
+      this.tcpRouting = new TCPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+      this.tcpSemaphore.release();
+
+      this.rtpSemaphore.tryAcquire();
+      this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+      this.rtpSemaphore.release();
+
+      this.audioSemaphore.tryAcquire();
+      this.audioRouting = new AudioRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
+      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+      this.audioSemaphore.release();
     }
 
     /**
@@ -2059,9 +2089,7 @@ public class PacketHandler implements IListenDataPacket {
         flood=0;
 
         if(this.nodeEdges!=null && edges!=null){
-
           removeOldFlow(edges);
-
         }
 
         this.nodeEdges = edges;
@@ -2073,25 +2101,10 @@ public class PacketHandler implements IListenDataPacket {
 
         updateEdgeStatistics();
 
-          this.icmpSemaphore.tryAcquire();
-          this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
-          this.icmpSemaphore.release();
-
-          this.tcpSemaphore.tryAcquire();
-          this.tcpRouting = new TCPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
-          this.tcpSemaphore.release();
-
-          this.rtpSemaphore.tryAcquire();
-          this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
-          this.rtpSemaphore.release();
-
-          this.audioSemaphore.tryAcquire();
-          this.audioRouting = new AudioRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
-          this.audioSemaphore.release();
+        if(first){
+          resetRoutingProtocols();
+          first=false;
+        }
 
 
         log.debug("The topology has been updated");

@@ -56,6 +56,7 @@ import org.opendaylight.controller.sal.core.NodeConnector;
 import org.opendaylight.controller.sal.flowprogrammer.Flow;
 import org.opendaylight.controller.sal.flowprogrammer.IFlowProgrammerService;
 import org.opendaylight.controller.sal.match.Match;
+import org.opendaylight.controller.sal.match.MatchField;
 import org.opendaylight.controller.sal.match.MatchType;
 import org.opendaylight.controller.sal.packet.BitBufferHelper;
 import org.opendaylight.controller.sal.packet.Ethernet;
@@ -68,6 +69,7 @@ import org.opendaylight.controller.sal.packet.UDP;
 import org.opendaylight.controller.sal.packet.Packet;
 import org.opendaylight.controller.sal.packet.PacketResult;
 import org.opendaylight.controller.sal.packet.RawPacket;
+import org.opendaylight.controller.sal.reader.FlowOnNode;
 import org.opendaylight.controller.sal.reader.NodeConnectorStatistics;
 import org.opendaylight.controller.sal.utils.IPProtocols;
 import org.opendaylight.controller.sal.utils.Status;
@@ -113,7 +115,7 @@ public class TCPRouting {
 		private Graph<Node, Edge> g = new SparseMultigraph();
 		private DijkstraShortestPath<Node, Edge> tcpShortestPath;
 
-		private ConcurrentMap<Map<Node, Node>, List<Edge>> pathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+		private ConcurrentMap<Map<Node, Node>, List<Edge>> tcpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
 		/*********Statistics Constants**********/
 
@@ -134,7 +136,7 @@ public class TCPRouting {
 		public boolean needUpdate = false;
 
 		/**
-		*Constructor for RTPHandler class
+		*Constructor for TCPHandler class
 		*@param nodes The nodeEdges map
 		*@param edges The edgeMatrix
 		*@param latencies The latencyMatrix
@@ -203,23 +205,23 @@ public class TCPRouting {
 	        }
 	        else{
 
-	          this.tcpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/TCPFACTOR +
-	          rtpStatisticsCost(this.edgeMatrix[i][j])/10 + rtpBandWithCost(this.edgeMatrix[i][j]);
+	          this.tcpCostMatrix[i][j] = tcpLatencyCost(this.edgeMatrix[i][j])/TCPFACTOR +
+	          tcpStatisticsCost(this.edgeMatrix[i][j])/10 + tcpBandWithCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.tcpEdgeCostMap.put(this.edgeMatrix[i][j], this.tcpCostMatrix[i][j]);
 	      }
 	    }
 
-	    buildRTPTransformerMap(this.tcpEdgeCostMap);
+	    buildTCPTransformerMap(this.tcpEdgeCostMap);
 
 	  }
 
 		/**
-	  *Function that is called when is necessary to build the transformer rtp for Dijkstra
+	  *Function that is called when is necessary to build the transformer tcp for Dijkstra
 	  */
 
-	  private void buildRTPTransformerMap(final Map<Edge, Long> tcpEdgeCostMap2){
+	  private void buildTCPTransformerMap(final Map<Edge, Long> tcpEdgeCostMap2){
 
 	    this.costTCPTransformer = new Transformer<Edge, Long>(){
 	      public Long transform(Edge e){
@@ -339,12 +341,12 @@ public class TCPRouting {
 
 		/**
     *This function is called when is necessary evaluate the latencyMatrix for an edge and
-    *rtp protocol
+    *tcp protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long rtpLatencyCost(Edge edge){
+    private Long tcpLatencyCost(Edge edge){
       int i = getNodeConnectorIndex(edge.getTailNodeConnector());
       int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
@@ -384,12 +386,12 @@ public class TCPRouting {
 
 		/**
     *This function is called when is necessary evaluate the statisticsMap for an edge and
-    *rtp protocol
+    *tcp protocol
     *@param edge The edge
     *@return The Long value after the process
     */
 
-    private Long rtpStatisticsCost(Edge edge){
+    private Long tcpStatisticsCost(Edge edge){
       Long cost = 0L;
       Long temp1 = 0L;
       Long temp2 = 0L;
@@ -438,7 +440,7 @@ public class TCPRouting {
 		*@return result The Long value after evaluation
 		*/
 
-		private Long rtpBandWithCost(Edge edge){
+		private Long tcpBandWithCost(Edge edge){
 			Long edgeBW = this.edgeBandWith.get(edge);
 			Long result = DEFAULTBWCOST;
 
@@ -484,12 +486,12 @@ public class TCPRouting {
 			List<Edge> tempPath = new ArrayList<Edge>();
       List<Edge> definitivePath = new ArrayList<Edge>();
 
-			if(pathMap.containsKey(tempMap)){
-				tempPath = pathMap.get(tempMap);
+			if(tcpPathMap.containsKey(tempMap)){
+				tempPath = tcpPathMap.get(tempMap);
 			}else{
 				this.tcpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTCPTransformer);
 				tempPath = tcpShortestPath.getPath(srcNode, dstNode);
-				pathMap.put(tempMap, tempPath);
+				tcpPathMap.put(tempMap, tempPath);
 			}
 
       boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
@@ -506,6 +508,149 @@ public class TCPRouting {
 		}
 
 		/**
+		*This function del old TCP flows when an Edge is down
+		*@param edge The Edge which is down now
+		*@param flowProgrammer The service which enable the posibility to del or install flows
+		*@param statisticsManager The statistics manager to obtain the flows on a Node.
+		*/
+
+		public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+			Set<Map<Node, Node>> tempMaps = tcpPathMap.keySet();
+
+			if(tempMaps.isEmpty()){
+				Set<Node> nodes = this.nodeEdges.keySet();
+
+				for(Iterator it = nodes.iterator(); it.hasNext();){
+					Node tempNode = (Node)it.next();
+
+					List<FlowOnNode> flowsOnNode = new ArrayList();
+
+					try{
+						flowsOnNode = statisticsManager.getFlows(tempNode);
+					}
+					catch(RuntimeException bad){
+						log.trace("No flows get, time to try in noCache flows");
+						try{
+							flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+						}
+						catch(RuntimeException veryBad){
+							log.trace("Impossible to obtain the flows");
+						}
+					}
+
+					for(int j = 0; j<flowsOnNode.size(); j++){
+						FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+						Flow tempFlow = tempFlowOnNode.getFlow();
+
+						if(tempFlow!=null){
+							MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+							MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.TCP.byteValue());
+
+							if(tempField.equals(tempField2)){
+								try{
+									log.trace("Trying removing "+tempFlow+" on "+tempNode);
+									flowProgrammerService.removeFlow(tempNode, tempFlow);
+								}
+								catch(RuntimeException e8){
+									log.trace("Error removing flow");
+								}
+							}
+						}
+					}
+				}
+			}
+			else{
+				for(Iterator it = tempMaps.iterator(); it.hasNext();){
+					Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
+					List<Edge> tempPath = tcpPathMap.get(tempMap);
+
+					if(tempPath.contains(edge)){
+
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getTailNodeConnector().getNode();
+
+							List<FlowOnNode> flowsOnNode = new ArrayList();
+
+							try{
+								flowsOnNode = statisticsManager.getFlows(tempNode);
+							}
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.TCP.byteValue());
+
+									if(tempField.equals(tempField2)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
+									}
+								}
+							}
+						}
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getHeadNodeConnector().getNode();
+
+							List<FlowOnNode> flowsOnNode = new ArrayList();
+
+							try{
+								flowsOnNode = statisticsManager.getFlows(tempNode);
+							}
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.TCP.byteValue());
+
+									if(tempField.equals(tempField2)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+
+		/**
 		*Function that is called when is necessary to update a TopologyGraph
 		*@param grafo The new graph
 		*/
@@ -515,7 +660,7 @@ public class TCPRouting {
 		}
 
 		/**
-		*Function that is called when is necessary to update the rtpCostMartix
+		*Function that is called when is necessary to update the tcpCostMartix
 		*@param latencies The latencyMatrix
 		*@param latency The min latency
 		*@param medLatencies The mediumLatencyMatrix

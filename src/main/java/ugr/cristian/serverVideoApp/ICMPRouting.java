@@ -464,86 +464,130 @@ public class ICMPRouting {
 
   public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
     Set<Map<Node, Node>> tempMaps = icmpPathMap.keySet();
-    for(Iterator it = tempMaps.iterator(); it.hasNext();){
-      Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
-      List<Edge> tempPath = icmpPathMap.get(tempMap);
 
-      if(tempPath.contains(edge)){
-        icmpPathMap.remove(tempMap);
+    if(tempMaps.isEmpty()){
+      Set<Node> nodes = this.nodeEdges.keySet();
 
-        for(int i=0; i<tempPath.size(); i++){
-          Edge tempEdge = tempPath.get(i);
-          Node tempNode = tempEdge.getTailNodeConnector().getNode();
+      for(Iterator it = nodes.iterator(); it.hasNext();){
+        Node tempNode = (Node)it.next();
 
-          List<FlowOnNode> flowsOnNode = new ArrayList();
+        List<FlowOnNode> flowsOnNode = new ArrayList();
 
+        try{
+          flowsOnNode = statisticsManager.getFlows(tempNode);
+        }
+        catch(RuntimeException bad){
+          log.trace("No flows get, time to try in noCache flows");
           try{
-            flowsOnNode = statisticsManager.getFlows(tempNode);
+            flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
           }
-          catch(RuntimeException bad){
-            log.trace("No flows get, time to try in noCache flows");
-            try{
-              flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
-            }
-            catch(RuntimeException veryBad){
-              log.trace("Impossible to obtain the flows");
-            }
+          catch(RuntimeException veryBad){
+            log.trace("Impossible to obtain the flows");
           }
+        }
 
-          for(int j = 0; j<flowsOnNode.size(); j++){
-            FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
-            Flow tempFlow = tempFlowOnNode.getFlow();
+        for(int j = 0; j<flowsOnNode.size(); j++){
+          FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+          Flow tempFlow = tempFlowOnNode.getFlow();
 
-            if(tempFlow!=null){
-              MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
-              MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+          if(tempFlow!=null){
+            MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+            MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
 
-              if(tempField.equals(tempField2)){
-                try{
-                  log.trace("Trying removing "+tempFlow+" on "+tempNode);
-                  flowProgrammerService.removeFlow(tempNode, tempFlow);
-                }
-                catch(RuntimeException e8){
-                  log.trace("Error removing flow");
-                }
+            if(tempField.equals(tempField2)){
+              try{
+                log.trace("Trying removing "+tempFlow+" on "+tempNode);
+                flowProgrammerService.removeFlow(tempNode, tempFlow);
+              }
+              catch(RuntimeException e8){
+                log.trace("Error removing flow");
               }
             }
           }
         }
-        for(int i=0; i<tempPath.size(); i++){
-          Edge tempEdge = tempPath.get(i);
-          Node tempNode = tempEdge.getHeadNodeConnector().getNode();
+      }
+    }
+    else{
+      for(Iterator it = tempMaps.iterator(); it.hasNext();){
+        Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
+        List<Edge> tempPath = icmpPathMap.get(tempMap);
 
-          List<FlowOnNode> flowsOnNode = new ArrayList();
+        if(tempPath.contains(edge)){
 
-          try{
-            flowsOnNode = statisticsManager.getFlows(tempNode);
-          }
-          catch(RuntimeException bad){
-            log.trace("No flows get, time to try in noCache flows");
+          for(int i=0; i<tempPath.size(); i++){
+            Edge tempEdge = tempPath.get(i);
+            Node tempNode = tempEdge.getTailNodeConnector().getNode();
+
+            List<FlowOnNode> flowsOnNode = new ArrayList();
+
             try{
-              flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+              flowsOnNode = statisticsManager.getFlows(tempNode);
             }
-            catch(RuntimeException veryBad){
-              log.trace("Impossible to obtain the flows");
+            catch(RuntimeException bad){
+              log.trace("No flows get, time to try in noCache flows");
+              try{
+                flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+              }
+              catch(RuntimeException veryBad){
+                log.trace("Impossible to obtain the flows");
+              }
+            }
+
+            for(int j = 0; j<flowsOnNode.size(); j++){
+              FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+              Flow tempFlow = tempFlowOnNode.getFlow();
+
+              if(tempFlow!=null){
+                MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+                MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+
+                if(tempField.equals(tempField2)){
+                  try{
+                    log.trace("Trying removing "+tempFlow+" on "+tempNode);
+                    flowProgrammerService.removeFlow(tempNode, tempFlow);
+                  }
+                  catch(RuntimeException e8){
+                    log.trace("Error removing flow");
+                  }
+                }
+              }
             }
           }
+          for(int i=0; i<tempPath.size(); i++){
+            Edge tempEdge = tempPath.get(i);
+            Node tempNode = tempEdge.getHeadNodeConnector().getNode();
 
-          for(int j = 0; j<flowsOnNode.size(); j++){
-            FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
-            Flow tempFlow = tempFlowOnNode.getFlow();
+            List<FlowOnNode> flowsOnNode = new ArrayList();
 
-            if(tempFlow!=null){
-              MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
-              MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+            try{
+              flowsOnNode = statisticsManager.getFlows(tempNode);
+            }
+            catch(RuntimeException bad){
+              log.trace("No flows get, time to try in noCache flows");
+              try{
+                flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+              }
+              catch(RuntimeException veryBad){
+                log.trace("Impossible to obtain the flows");
+              }
+            }
 
-              if(tempField.equals(tempField2)){
-                try{
-                  log.trace("Trying removing "+tempFlow+" on "+tempNode);
-                  flowProgrammerService.removeFlow(tempNode, tempFlow);
-                }
-                catch(RuntimeException e8){
-                  log.trace("Error removing flow");
+            for(int j = 0; j<flowsOnNode.size(); j++){
+              FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+              Flow tempFlow = tempFlowOnNode.getFlow();
+
+              if(tempFlow!=null){
+                MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+                MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.ICMP.byteValue());
+
+                if(tempField.equals(tempField2)){
+                  try{
+                    log.trace("Trying removing "+tempFlow+" on "+tempNode);
+                    flowProgrammerService.removeFlow(tempNode, tempFlow);
+                  }
+                  catch(RuntimeException e8){
+                    log.trace("Error removing flow");
+                  }
                 }
               }
             }
@@ -553,8 +597,9 @@ public class ICMPRouting {
     }
   }
 
+
 	/**
-	*Function that is called when is necessary to update the rtpCostMartix
+	*Function that is called when is necessary to update the icmpCostMartix
 	*@param latencies The latencyMatrix
 	*@param latency The min latency
 	*@param medLatencies The mediumLatencyMatrix

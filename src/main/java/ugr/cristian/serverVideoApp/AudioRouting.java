@@ -56,6 +56,7 @@ import org.opendaylight.controller.sal.core.NodeConnector;
 import org.opendaylight.controller.sal.flowprogrammer.Flow;
 import org.opendaylight.controller.sal.flowprogrammer.IFlowProgrammerService;
 import org.opendaylight.controller.sal.match.Match;
+import org.opendaylight.controller.sal.match.MatchField;
 import org.opendaylight.controller.sal.match.MatchType;
 import org.opendaylight.controller.sal.packet.BitBufferHelper;
 import org.opendaylight.controller.sal.packet.Ethernet;
@@ -68,6 +69,7 @@ import org.opendaylight.controller.sal.packet.UDP;
 import org.opendaylight.controller.sal.packet.Packet;
 import org.opendaylight.controller.sal.packet.PacketResult;
 import org.opendaylight.controller.sal.packet.RawPacket;
+import org.opendaylight.controller.sal.reader.FlowOnNode;
 import org.opendaylight.controller.sal.reader.NodeConnectorStatistics;
 import org.opendaylight.controller.sal.utils.IPProtocols;
 import org.opendaylight.controller.sal.utils.Status;
@@ -113,7 +115,7 @@ public class AudioRouting {
 		private Graph<Node, Edge> g = new SparseMultigraph();
 		private DijkstraShortestPath<Node, Edge> audioShortestPath;
 
-		private ConcurrentMap<Map<Node, Node>, List<Edge>> pathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+		private ConcurrentMap<Map<Node, Node>, List<Edge>> audioPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
 		/*********Statistics Constants**********/
 
@@ -447,7 +449,7 @@ public class AudioRouting {
 		/******************************PUBLIC METHODS*****************************
 
     /**
-    *Function that is called when is necessary to check if a Packet is RTP
+    *Function that is called when is necessary to check if a Packet is Audio
     *@param rawPayload The payload of the packet
     *@param dstPort The dstPort for the packet
     *@return True or false.
@@ -481,12 +483,12 @@ public class AudioRouting {
 			List<Edge> tempPath = new ArrayList<Edge>();
       List<Edge> definitivePath = new ArrayList<Edge>();
 
-			if(pathMap.containsKey(tempMap)){
-				tempPath = pathMap.get(tempMap);
+			if(audioPathMap.containsKey(tempMap)){
+				tempPath = audioPathMap.get(tempMap);
 			}else{
 				this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
 				tempPath = audioShortestPath.getPath(srcNode, dstNode);
-				pathMap.put(tempMap, tempPath);
+				audioPathMap.put(tempMap, tempPath);
 			}
 
       boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
@@ -503,6 +505,156 @@ public class AudioRouting {
 		}
 
 		/**
+		*This function del old Audio flows when an Edge is down
+		*@param edge The Edge which is down now
+		*@param flowProgrammer The service which enable the posibility to del or install flows
+		*@param statisticsManager The statistics manager to obtain the flows on a Node.
+		*/
+
+		public void removeFlows(Edge edge, IFlowProgrammerService flowProgrammerService, IStatisticsManager statisticsManager){
+			Set<Map<Node, Node>> tempMaps = audioPathMap.keySet();
+
+			if(tempMaps.isEmpty()){
+				Set<Node> nodes = this.nodeEdges.keySet();
+
+				for(Iterator it = nodes.iterator(); it.hasNext();){
+					Node tempNode = (Node)it.next();
+
+					List<FlowOnNode> flowsOnNode = new ArrayList();
+
+					try{
+						flowsOnNode = statisticsManager.getFlows(tempNode);
+					}
+					catch(RuntimeException bad){
+						log.trace("No flows get, time to try in noCache flows");
+						try{
+							flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+						}
+						catch(RuntimeException veryBad){
+							log.trace("Impossible to obtain the flows");
+						}
+					}
+
+					for(int j = 0; j<flowsOnNode.size(); j++){
+						FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+						Flow tempFlow = tempFlowOnNode.getFlow();
+
+						if(tempFlow!=null){
+							MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+							MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+							MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+							MatchField tempField4 = new MatchField(MatchType.TP_DST, audioPort.shortValue());
+
+							if(tempField.equals(tempField2)&& tempField3.equals(tempField4)){
+								try{
+									log.trace("Trying removing "+tempFlow+" on "+tempNode);
+									flowProgrammerService.removeFlow(tempNode, tempFlow);
+								}
+								catch(RuntimeException e8){
+									log.trace("Error removing flow");
+								}
+							}
+						}
+					}
+				}
+			}
+			else{
+				for(Iterator it = tempMaps.iterator(); it.hasNext();){
+					Map<Node, Node> tempMap = (Map<Node, Node>)it.next();
+					List<Edge> tempPath = audioPathMap.get(tempMap);
+
+					if(tempPath.contains(edge)){
+
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getTailNodeConnector().getNode();
+
+							List<FlowOnNode> flowsOnNode = new ArrayList();
+
+							try{
+								flowsOnNode = statisticsManager.getFlows(tempNode);
+							}
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+									MatchField tempField4 = new MatchField(MatchType.TP_DST, audioPort.shortValue());
+
+									if(tempField.equals(tempField2)&& tempField3.equals(tempField4)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
+									}
+								}
+							}
+						}
+						for(int i=0; i<tempPath.size(); i++){
+							Edge tempEdge = tempPath.get(i);
+							Node tempNode = tempEdge.getHeadNodeConnector().getNode();
+
+							List<FlowOnNode> flowsOnNode = new ArrayList();
+
+							try{
+								flowsOnNode = statisticsManager.getFlows(tempNode);
+							}
+							catch(RuntimeException bad){
+								log.trace("No flows get, time to try in noCache flows");
+								try{
+									flowsOnNode = statisticsManager.getFlowsNoCache(tempNode);
+								}
+								catch(RuntimeException veryBad){
+									log.trace("Impossible to obtain the flows");
+								}
+							}
+
+							for(int j = 0; j<flowsOnNode.size(); j++){
+								FlowOnNode tempFlowOnNode = flowsOnNode.get(j);
+								Flow tempFlow = tempFlowOnNode.getFlow();
+
+								if(tempFlow!=null){
+									MatchField tempField = tempFlow.getMatch().getField(MatchType.NW_PROTO);
+									MatchField tempField3 = tempFlow.getMatch().getField(MatchType.TP_DST);
+									MatchField tempField2 = new MatchField(MatchType.NW_PROTO, IPProtocols.UDP.byteValue());
+									MatchField tempField4 = new MatchField(MatchType.TP_DST, audioPort.shortValue());
+
+
+									if(tempField.equals(tempField2) && tempField3.equals(tempField4)){
+										try{
+											log.trace("Trying removing "+tempFlow+" on "+tempNode);
+											flowProgrammerService.removeFlow(tempNode, tempFlow);
+										}
+										catch(RuntimeException e8){
+											log.trace("Error removing flow");
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+
+		/**
 		*Function that is called when is necessary to update a TopologyGraph
 		*@param grafo The new graph
 		*/
@@ -512,7 +664,7 @@ public class AudioRouting {
 		}
 
 		/**
-		*Function that is called when is necessary to update the rtpCostMartix
+		*Function that is called when is necessary to update the audioCostMartix
 		*@param latencies The latencyMatrix
 		*@param latency The min latency
 		*@param medLatencies The mediumLatencyMatrix
