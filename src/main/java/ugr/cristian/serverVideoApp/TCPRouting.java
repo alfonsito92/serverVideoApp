@@ -130,7 +130,7 @@ public class TCPRouting {
 
 		/***************************************/
 	  private final Long TCPFACTOR = 1000L; //To get the difference in ms
-	  private final Long TCPDEFAULTCOST = 30L;
+	  private final Long TCPDEFAULTCOST = 10L;
 		private final Long DEFAULTBWCOST = 10L;
 		/****************************************/
 		public boolean needUpdate = false;
@@ -205,8 +205,7 @@ public class TCPRouting {
 	        }
 	        else{
 
-	          this.tcpCostMatrix[i][j] = tcpLatencyCost(this.edgeMatrix[i][j])/TCPFACTOR +
-	          tcpStatisticsCost(this.edgeMatrix[i][j])/10 + tcpBandWithCost(this.edgeMatrix[i][j]);
+	          this.tcpCostMatrix[i][j] = tcpLossCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.tcpEdgeCostMap.put(this.edgeMatrix[i][j], this.tcpCostMatrix[i][j]);
@@ -383,6 +382,64 @@ public class TCPRouting {
       }
       return cost;
     }
+
+		/**
+		*Function that is called when is necessary evaluate the loss in a Edge
+		*@param edge The edge
+		*@return The cost
+		*/
+
+		private Long tcpLossCost(Edge edge){
+
+			Long cost = 0L;
+			Long temp1 = 0L;
+			Long temp2 = 0L;
+
+			ArrayList<Long> tempArray1 = new ArrayList<Long>();
+			ArrayList<Long> tempArray2 = new ArrayList<Long>();
+
+			Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+
+			tempArray1 = tempStatistics.get(transmitBytes);
+			tempArray2 = tempStatistics.get(receiveBytes);
+
+			if(tempArray1 == null){
+				tempArray1.add(10L);
+				tempArray1.add(10L);
+			}
+			if(tempArray2 == null){
+				tempArray2.add(10L);
+				tempArray2.add(10L);
+			}
+
+			if(tempArray1.get(0)!=0 && tempArray2.get(0) !=0 ){
+
+				if(tempArray1.get(0)>tempArray2.get(0)){
+					cost += 100*(tempArray1.get(0) - tempArray2.get(0))/tempArray1.get(0);
+				}
+				else{
+					cost += 100*(tempArray2.get(0) - tempArray1.get(0))/tempArray2.get(0);
+				}
+			}else{
+				cost += TCPDEFAULTCOST;
+			}
+
+			if(tempArray1.get(1)!=0 && tempArray2.get(1) !=0 ){
+
+				if(tempArray1.get(1)>tempArray2.get(1)){
+					cost += 100*(tempArray1.get(1) - tempArray2.get(1))/tempArray1.get(1);
+				}
+				else{
+					cost += 100*(tempArray2.get(1) - tempArray1.get(1))/tempArray2.get(1);
+				}
+			}else{
+				cost += TCPDEFAULTCOST;
+			}
+
+			return cost/2;
+
+
+		}
 
 		/**
     *This function is called when is necessary evaluate the statisticsMap for an edge and
@@ -662,7 +719,7 @@ public class TCPRouting {
 		}
 
 		/**
-		*Function that is called when is necessary to update the tcpCostMartix
+		*Function that is called when is necessary to update the tcpCostMatrix
 		*@param latencies The latencyMatrix
 		*@param latency The min latency
 		*@param medLatencies The mediumLatencyMatrix
@@ -686,6 +743,5 @@ public class TCPRouting {
 			this.minBandWith = minBW;
 
 			buildTCPCostMatrix();
-
 		}
 }

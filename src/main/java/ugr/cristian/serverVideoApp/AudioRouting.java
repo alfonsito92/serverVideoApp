@@ -130,11 +130,11 @@ public class AudioRouting {
 
 		/***************************************/
 
-		private final Integer audioPort = 1992;
+		private final Integer audioPort = 30000;
 		private final Integer VERSION = 2;
 		private final Integer PAYLOADTYPE = 33; //MPEG2
 	  private final Long AUDIOFACTOR = 1000L; //To get the difference in ms
-	  private final Long AUDIODEFAULTCOST = 30L;
+	  private final Long AUDIODEFAULTCOST = 500L;
     private final Long DEFAULTBWCOST = 10L;
 		/****************************************/
 		public boolean needUpdate = false;
@@ -224,8 +224,7 @@ public class AudioRouting {
 	        }
 	        else{
 
-	          this.audioCostMatrix[i][j] = audioLatencyCost(this.edgeMatrix[i][j])/AUDIOFACTOR +
-	          audioStatisticsCost(this.edgeMatrix[i][j])/10+audioBandWithCost(this.edgeMatrix[i][j]);
+	          this.audioCostMatrix[i][j] = audioLatencyCost(this.edgeMatrix[i][j])/AUDIOFACTOR;
 	        }
 
 	        this.audioEdgeCostMap.put(this.edgeMatrix[i][j], this.audioCostMatrix[i][j]);
@@ -385,7 +384,12 @@ public class AudioRouting {
         }
 
         if(temp1 != null && temp2 != null){
-          cost=temp1*4;
+          if(temp1>temp2){
+						cost = temp1-temp2;
+					}else{
+						cost = temp2 -temp1;
+					}
+					cost += temp2;
         }
       }
       else{
@@ -484,12 +488,13 @@ public class AudioRouting {
       List<Edge> definitivePath = new ArrayList<Edge>();
 
 			if(audioPathMap.containsKey(tempMap)){
-				tempPath = audioPathMap.get(tempMap);
-			}else{
-				this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
-				tempPath = audioShortestPath.getPath(srcNode, dstNode);
-				audioPathMap.put(tempMap, tempPath);
+				tempPath = audioPathMap.remove(tempMap);
 			}
+
+			this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
+			tempPath = audioShortestPath.getPath(srcNode, dstNode);
+			audioPathMap.put(tempMap, tempPath);
+
 
       boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 

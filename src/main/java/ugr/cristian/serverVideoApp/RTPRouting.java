@@ -209,8 +209,7 @@ public class RTPRouting {
 	        }
 	        else{
 
-	          this.rtpCostMatrix[i][j] = rtpLatencyCost(this.edgeMatrix[i][j])/RTPFACTOR +
-	          rtpStatisticsCost(this.edgeMatrix[i][j])/10 + rtpBandWithCost(this.edgeMatrix[i][j]);
+	          this.rtpCostMatrix[i][j] = rtpBandWithCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
@@ -534,12 +533,11 @@ public class RTPRouting {
       List<Edge> definitivePath = new ArrayList<Edge>();
 
 			if(rtpPathMap.containsKey(tempMap)){
-				tempPath = rtpPathMap.get(tempMap);
-			}else{
-				this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
-				tempPath = rtpShortestPath.getPath(srcNode, dstNode);
-				rtpPathMap.put(tempMap, tempPath);
+				rtpPathMap.remove(tempMap);
 			}
+			this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
+			tempPath = rtpShortestPath.getPath(srcNode, dstNode);
+			rtpPathMap.put(tempMap, tempPath);
 
       boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 
@@ -715,7 +713,7 @@ public class RTPRouting {
 		}
 
 		/**
-		*Function that is called when is necessary to update the rtpCostMartix
+		*Function that is called when is necessary to update the rtpCostMatrix
 		*@param latencies The latencyMatrix
 		*@param latency The min latency
 		*@param medLatencies The mediumLatencyMatrix

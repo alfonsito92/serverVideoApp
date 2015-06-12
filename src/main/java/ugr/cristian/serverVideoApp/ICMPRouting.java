@@ -102,18 +102,41 @@ public class ICMPRouting {
   private Long minLatency;
   private Long mediumLatencyMatrix[][];
   private Long minMediumLatency;
+  private Long maxMediumLatency;
 
-  private Long icmpCostMatrix[][];
+  private Long jitterMatrix[][];
+  private Long minJitter;
+  private Long maxJitter;
+
+  private Double icmpCostMatrix[][];
 
   private Transformer<Edge, ? extends Number> icmpCostTransformer = null;
 
   private Graph<Node, Edge> g = new SparseMultigraph();
 	private DijkstraShortestPath<Node, Edge> icmpShortestPath;
 
-  private Map<Edge, Long> icmpEdgeCostMap = new HashMap<Edge, Long>();
+  private Map<Edge, Double> icmpEdgeCostMap = new HashMap<Edge, Double>();
 
   private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
   private Map<String, Long> maxStatistics = new HashMap<String, Long>();
+
+  /******************************/
+  private Double aL=0.0;
+  private Double bL=0.0;
+
+  private Double aJ=0.0;
+  private Double bJ=0.0;
+
+  private Double latMin=5.0;
+  private Double jitMin=2.0;
+
+  private Double nsTOms = 1000000.0;
+
+  private Double alpha=0.5;
+  private Double beta=0.5;
+  private Double gamma=0.0;
+  private Double sigma = 0.0;
+  /******************************/
 
   /*********Statistics Constants**********/
 
@@ -159,9 +182,12 @@ public class ICMPRouting {
 
 		this.g = grapho;
 
+    buildICMPParameters();
+
     this.icmpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
 		buildICMPCostMatrix();
+
 		buildICMPTransformerMap(this.icmpEdgeCostMap);
 
 	}
@@ -174,7 +200,7 @@ public class ICMPRouting {
   private void buildICMPCostMatrix(){
     int l = this.nodeEdges.size();
     int h = this.nodeEdges.size();
-    this.icmpCostMatrix = new Long[l][h];
+    this.icmpCostMatrix = new Double[l][h];
     this.icmpEdgeCostMap.clear();
 
     for(int i=0; i<l; i++){
@@ -182,15 +208,20 @@ public class ICMPRouting {
       for(int j=0; j<h; j++){
 
         if(i==j){
-          this.icmpCostMatrix[i][j]=0L;
+          this.icmpCostMatrix[i][j]=0.0;
         }
         else{
           if(this.edgeMatrix[i][j]==null){
             this.icmpCostMatrix[i][j]=null;
           }
           else{
-            this.icmpCostMatrix[i][j] = icmpEvaluationLatencyCost(this.edgeMatrix[i][j]) +
-            icmpEvaluationStatisticsCost(this.edgeMatrix[i][j])/10;
+              Double temp = alpha*icmpEvaluationLatencyCost(this.edgeMatrix[i][j]); //+  beta*icmpEvaluationJitterCost(this.edgeMatrix[i][j]);
+
+              if(temp == 0.0 || temp== null){
+                this.icmpCostMatrix[i][j]=10.0;
+              }else{
+                this.icmpCostMatrix[i][j]=temp;
+              }
           }
         }
         icmpEdgeCostMap.put(this.edgeMatrix[i][j], this.icmpCostMatrix[i][j]);
@@ -199,20 +230,124 @@ public class ICMPRouting {
   }
 
   /**
+  *This function build the jitter matrix and the aL, bL, aJ, bJ parameters
+  */
+
+  private void buildICMPParameters(){
+
+    if(this.mediumLatencyMatrix != null){
+
+			this.maxMediumLatency = findMaxMatrix(this.mediumLatencyMatrix);
+			this.minMediumLatency = findMinMatrix(this.mediumLatencyMatrix);
+
+      if(this.maxMediumLatency!=null && this.minMediumLatency!=null){
+        Double min = this.minMediumLatency/nsTOms;
+        Double max = this.maxMediumLatency/nsTOms;
+        bL = (max - 100.0*min)/(max - min);
+				aL = (1-bL)/min;
+			}
+
+		}
+
+    createICMPJitterMatrix();
+
+    if(this.jitterMatrix != null && this.jitterMatrix.length>0){
+
+				this.minJitter = findMinMatrix(this.jitterMatrix);
+				this.maxJitter = findMaxMatrix(this.jitterMatrix);
+
+				if(this.minJitter!=null && this.maxJitter!=null){
+          Double min = this.minJitter/nsTOms;
+          Double max = this.maxJitter/nsTOms;
+          bJ = (max - 100.0*min)/(max - min);
+          if(bJ!=1){
+            aJ = (1-bJ)/min;
+          }else{
+            aJ = 1.0;
+          }
+
+				}
+
+			}
+
+  }
+
+  /**
   *Function that is called when is necessary to build the transformer for Dijkstra
   *@param edgeCostMap2 The edgeCostMap which is necessary to call the constructor
   *of the transformer
   */
 
-  private void buildICMPTransformerMap(final Map<Edge, Long> edgeCostMap2){
+  private void buildICMPTransformerMap(final Map<Edge, Double> edgeCostMap2){
 
-    icmpCostTransformer = new Transformer<Edge, Long>(){
-      public Long transform(Edge e){
+    icmpCostTransformer = new Transformer<Edge, Number>(){
+      public Double transform(Edge e){
 
         return edgeCostMap2.get(e);
       }
     };
 
+  }
+
+  /**
+  *Function that is called when is neccesary to create the jitter Matrix
+  */
+
+  private void createICMPJitterMatrix(){
+
+    this.jitterMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+
+    for(int i=0; i<jitterMatrix.length; i++){
+
+			for(int j=0; j<jitterMatrix.length; j++){
+
+				if(this.latencyMatrix[i][j]!=null && this.mediumLatencyMatrix!=null){
+					jitterMatrix[i][j]=Math.abs(this.latencyMatrix[i][j]-this.mediumLatencyMatrix[i][j]);
+				}
+
+			}
+		}
+
+  }
+
+  /**
+  *This function returns the max value in a matrix
+  *@param matrix The matrix
+  *@return The max vale
+  */
+
+  private Long findMaxMatrix(Long matrix[][]){
+    Long resultado = 0L;
+    for(int i=0; i<matrix.length; i++){
+      for(int j=0; j<matrix.length; j++){
+        if(matrix[i][j]!=null){
+          if(resultado<matrix[i][j]){
+            resultado=matrix[i][j];
+          }
+        }
+      }
+    }
+    return resultado;
+  }
+
+  /**
+  *This function return the min Value in a Matrix
+  *@param matrix The matrix
+  *@return the min value
+  */
+
+  private Long findMinMatrix(Long matrix[][]){
+    Long resultado = 100000000000L;
+    for(int i=0; i<matrix.length; i++){
+      for(int j=0; j<matrix.length; j++){
+        if(matrix[i][j]!=null){
+          if(resultado>matrix[i][j]){
+            resultado=matrix[i][j];
+          }
+        }
+      }
+    }
+    return resultado;
   }
 
   /**
@@ -230,43 +365,92 @@ public class ICMPRouting {
   }
 
   /**
-  *This function is called when is necessary evaluate the latencyMatrix for an edge
+  *Function that is called when is necessary evaluate the cost associated to jitter
+  *in a edge
   *@param edge The edge
-  *@return The Long value after the process
+  *@return cost The associated cost
   */
 
-  private Long icmpEvaluationLatencyCost(Edge edge){
+  private Double icmpEvaluationJitterCost(Edge edge){
     int i = getNodeConnectorIndex(edge.getTailNodeConnector());
     int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
-    Long ret1 = 0L;
-    Long ret2 = 0L;
+    Double cost=10.0;
 
-    Long cost;
-    if(latencyMatrix!=null){
-      Long temp = this.latencyMatrix[i][j];
-      Long temp2 = this.mediumLatencyMatrix[i][j];
-
-      if(temp == null){
-        ret1=defaultCost;
-      }
-      else{
-        ret1 = temp/minLatency;
-      }
-
-      if(temp2 == null){
-        ret2=defaultCost;
-      }
-      else{
-        ret2=temp2/minMediumLatency;
+    if((maxJitter-minJitter)/nsTOms > latMin){
+      if(aJ!=null && bJ!=null && jitterMatrix[i][j]!=null){
+        cost = jitterMatrix[i][j]*aJ/nsTOms + bJ;
       }
     }
     else{
-      ret1=defaultCost;
-      ret2=defaultCost;
+      cost = 10.0;
+    }
+    if(aL!=null){
+      cost = aL*cost;
+    }else{
+      cost=cost/5.0;
     }
 
-    cost = ret1/2 + ret2;
+    return cost;
+  }
+
+  /**
+  *This function is called when is necessary evaluate the latencyMatrix for an edge
+  *@param edge The edge
+  *@return The double value after the process
+  */
+
+  private Double icmpEvaluationLatencyCost(Edge edge){
+    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+    Double cost=0.0;
+    log.debug(""+(maxMediumLatency-minMediumLatency)/nsTOms);
+    log.debug(""+maxMediumLatency);
+    log.debug(""+minMediumLatency);
+    if((maxMediumLatency-minMediumLatency)/nsTOms > latMin){
+      if(aL!=null && bL!=null && mediumLatencyMatrix[i][j]!=null){
+        cost = mediumLatencyMatrix[i][j]*aL/nsTOms + bL;
+      }
+    }
+    else{
+      cost = 10.0;
+    }
+
+    return cost;
+  }
+
+  /**
+  *This function is called when ins necessary evaluate the loss cost for a edge.
+  *@param edge The edge
+  *@return cost The double value (percent)
+  */
+
+  private Double icmpEvaluationLossCost(Edge edge){
+
+    Double cost = 0.0;
+    ArrayList<Long> temp1 = new ArrayList<Long>();
+    ArrayList<Long> temp2 = new ArrayList<Long>();
+
+    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+
+    temp1 = tempStatistics.get(transmitBytes);
+    temp2 = tempStatistics.get(receiveBytes);
+
+    if( temp1 == null || temp2 == null ){
+      return cost;
+    }else{
+      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
+      Long receive = temp2.get(0);
+
+      if(sent!=null && receive!=null){
+        if(sent>receive){
+          cost = ((double)sent - (double)receive)*100.0;
+          cost = cost/(double)sent;
+        }
+      }
+
+    }
     return cost;
   }
 
@@ -412,6 +596,39 @@ public class ICMPRouting {
 
   }
 
+  /**
+  *Function that is called when we pretend to show in log all the elements of a Matrix
+  *@matrix[][] The matrix
+  */
+
+  private void traceLongMatrix(Long matrix[][]){
+
+    for(int i=0; i<matrix.length; i++){
+      for(int j=0; j<matrix[i].length; j++){
+
+        log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+      }
+    }
+
+  }
+
+  /**
+  *Function that is called when we pretend to show in log all the elements of a Double Matrix
+  *@param matrix[][] The matrix
+  */
+
+  private void traceDoubleMatrix(Double matrix[][]){
+
+    for(int i=0; i<matrix.length; i++){
+      for(int j=0; j<matrix[i].length; j++){
+
+        log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+      }
+    }
+
+  }
 
   /******************************PUBLIC METHODS*****************************/
 
@@ -435,12 +652,11 @@ public class ICMPRouting {
 		tempMap.put(srcNode, dstNode);
 
 		if(this.icmpPathMap.containsKey(tempMap)){
-			tempPath = this.icmpPathMap.get(tempMap);
-		}else{
+		    this.icmpPathMap.remove(tempMap);
+		}
 			this.icmpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.icmpCostTransformer);
 			tempPath = icmpShortestPath.getPath(srcNode, dstNode);
 			this.icmpPathMap.put(tempMap, tempPath);
-		}
 
     boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 
@@ -603,7 +819,7 @@ public class ICMPRouting {
 
 
 	/**
-	*Function that is called when is necessary to update the icmpCostMartix
+	*Function that is called when is necessary to update the icmpCostMatrix
 	*@param latencies The latencyMatrix
 	*@param latency The min latency
 	*@param medLatencies The mediumLatencyMatrix
@@ -622,10 +838,10 @@ public class ICMPRouting {
 		this.edgeStatistics = statistics;
 		this.maxStatistics = max;
 
+
+    buildICMPParameters();
+
 		buildICMPCostMatrix();
-
-		buildICMPTransformerMap(this.icmpEdgeCostMap);
-
 	}
 
 	/**

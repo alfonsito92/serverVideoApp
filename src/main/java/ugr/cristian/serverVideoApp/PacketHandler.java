@@ -125,8 +125,8 @@ public class PacketHandler implements IListenDataPacket {
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
-  private short idleTimeOut = 20;
-  private short hardTimeOut = 30;
+  private short idleTimeOut = 30;
+  private short hardTimeOut = 3600;
 
   private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
 
@@ -151,12 +151,15 @@ public class PacketHandler implements IListenDataPacket {
   /*************************************/
   private int flood = 0;
 
-  private int MAXFLOODPACKET = 5;
+  private int MAXFLOODPACKET = 20;
 
   /*************************************/
-  private final Long UPDATETIME = 100L; //The time Interval to check the topology in milliseconds.
+  private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
+  private final Long LEARNTIME = 10000L;
   private Long t1 = System.currentTimeMillis();
   private Long t2 = 0L;
+  private Long t3 = System.currentTimeMillis();
+  private Long t4 = 0L;
   private Long statisticsT1 = 0L;
   private Long statisticsT2 = 0L;
   /*************************************/
@@ -293,7 +296,6 @@ public class PacketHandler implements IListenDataPacket {
     public PacketResult receiveDataPacket(RawPacket inPkt) {
       //Once a packet come the Topology has to be updated
 
-
       timeSemaphore.tryAcquire();
       t2 = System.currentTimeMillis();
       if((t2-t1) > UPDATETIME){
@@ -333,11 +335,8 @@ public class PacketHandler implements IListenDataPacket {
           InetAddress dstAddr = intToInetAddress(ipv4Pkt.getDestinationAddress());
           Object l4Datagram = ipv4Pkt.getPayload();
 
-          if(l4Datagram instanceof ICMP){
 
-            return handleICMPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B);
-
-          }else if(l4Datagram instanceof UDP){
+          if(l4Datagram instanceof UDP){
 
             UDP udpDatagram = (UDP) l4Datagram;
             int clientPort = udpDatagram.getSourcePort();
@@ -359,8 +358,10 @@ public class PacketHandler implements IListenDataPacket {
             int dstPort = tcpDatagram.getDestinationPort();
 
             return handleTCPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B, dstPort);
-          }
+          }else   if(l4Datagram instanceof ICMP){
 
+              return handleICMPPacket(inPkt, srcAddr, srcMAC_B, ingressConnector, node, dstAddr, dstMAC_B);
+          }
         }
       }
       return PacketResult.IGNORED;
@@ -926,6 +927,8 @@ public class PacketHandler implements IListenDataPacket {
           this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
           this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
           this.icmpSemaphore.release();
+
+          first = true;
           floodPacket(inPkt, node, ingressConnector);
         }
 
@@ -1491,6 +1494,9 @@ public class PacketHandler implements IListenDataPacket {
         // Create the flow
         Flow flow = new Flow(match, actions);
 
+        flow.setIdleTimeout(idleTimeOut);
+        flow.setHardTimeout(hardTimeOut);
+
         // Use FlowProgrammerService to program flow.
         try{
           semaphore.tryAcquire();
@@ -1546,6 +1552,10 @@ public class PacketHandler implements IListenDataPacket {
 
         // Create the flow
         Flow flow = new Flow(match, actions);
+
+        flow.setIdleTimeout(idleTimeOut);
+        flow.setHardTimeout(hardTimeOut);
+
 
         // Use FlowProgrammerService to program flow.
         try{
@@ -1603,6 +1613,10 @@ public class PacketHandler implements IListenDataPacket {
 
         // Create the flow
         Flow flow = new Flow(match, actions);
+
+        flow.setIdleTimeout(idleTimeOut);
+        flow.setHardTimeout(hardTimeOut);
+
 
         // Use FlowProgrammerService to program flow.
         try{
@@ -2032,7 +2046,7 @@ public class PacketHandler implements IListenDataPacket {
 
       ArrayList<Long> temp = this.edgeMediumMapTime.get(edge);
 
-      if(temp.size()==5){
+      if(temp.size()==20){
         temp.remove(0);
         temp.add(t);
       }
@@ -2077,9 +2091,10 @@ public class PacketHandler implements IListenDataPacket {
 
       Map<Node, Set<Edge>> edges = this.topologyManager.getNodeEdges();
 
-      if(nodeEdges.isEmpty() || !nodeEdges.equals(edges) || this.nodeEdges == null){
 
-        MAXFLOODPACKET = 3*this.nodeEdges.size();
+      if(this.nodeEdges.isEmpty() || !this.nodeEdges.equals(edges) || this.nodeEdges == null){
+
+        MAXFLOODPACKET = 6*this.nodeEdges.size();
 
         this.packetTime.clear();
         this.edgePackets.clear();
@@ -2093,6 +2108,7 @@ public class PacketHandler implements IListenDataPacket {
         }
 
         this.nodeEdges = edges;
+
         buildEdgeMatrix(edges);
 
         log.trace("The new map is " + this.nodeEdges);
@@ -2106,12 +2122,11 @@ public class PacketHandler implements IListenDataPacket {
           first=false;
         }
 
-
         log.debug("The topology has been updated");
 
-      }else{
-        updateEdgeStatistics();
+      }
 
+        updateEdgeStatistics();
         this.icmpSemaphore.tryAcquire();
         this.icmpRouting.updateStandardCostMatrix(this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
@@ -2133,8 +2148,14 @@ public class PacketHandler implements IListenDataPacket {
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
         this.audioSemaphore.release();
 
-      }
+        //log.debug("Estadisticas: "+this.edgeStatistics);
+        //log.debug("Latencia instantánea: ");
+        //traceLongMatrix(latencyMatrix);
 
+        //log.debug("Latencia media: ");
+        //traceLongMatrix(mediumLatencyMatrix);
+
+        //log.debug("Mapa de tiempos de enlaces: "+edgeMediumMapTime);
     }
 
 }
