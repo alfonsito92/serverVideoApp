@@ -1994,14 +1994,16 @@ public class PacketHandler implements IListenDataPacket {
     */
 
     private void traceLongMatrix(Long matrix[][]){
+      if(matrix!=null){
+        for(int i=0; i<matrix.length; i++){
+          for(int j=0; j<matrix[i].length; j++){
 
-      for(int i=0; i<matrix.length; i++){
-        for(int j=0; j<matrix[i].length; j++){
+            log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
 
-          log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
-
+          }
         }
       }
+
 
     }
 
@@ -2128,23 +2130,23 @@ public class PacketHandler implements IListenDataPacket {
 
         updateEdgeStatistics();
         this.icmpSemaphore.tryAcquire();
-        this.icmpRouting.updateStandardCostMatrix(this.latencyMatrix, this.minLatency,
+        this.icmpRouting.updateStandardCostMatrix(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics);
         this.icmpSemaphore.release();
 
         this.tcpSemaphore.tryAcquire();
-        this.tcpRouting.updateTCPCostMatrix(this.latencyMatrix, this.minLatency,
+        this.tcpRouting.updateTCPCostMatrix(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
         this.tcpSemaphore.release();
 
 
         this.rtpSemaphore.tryAcquire();
-        this.rtpRouting.updateRTPCostMatrix(this.latencyMatrix, this.minLatency,
+        this.rtpRouting.updateRTPCostMatrix(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
         this.rtpSemaphore.release();
 
         this.audioSemaphore.tryAcquire();
-        this.audioRouting.updateAudioCostMatrix(this.latencyMatrix, this.minLatency,
+        this.audioRouting.updateAudioCostMatrix(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
         this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.edgeBandWith, this.minBandWith);
         this.audioSemaphore.release();
 

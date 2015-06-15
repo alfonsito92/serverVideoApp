@@ -99,13 +99,18 @@ public class AudioRouting {
 		private Long minLatency;
 		private Long mediumLatencyMatrix[][];
 		private Long minMediumLatency;
+		private Long maxMediumLatency;
 
-		private Long audioCostMatrix[][];
+		private Long jitterMatrix[][];
+		private Long minJitter;
+		private Long maxJitter;
+
+		private Double audioCostMatrix[][];
 
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
-		private Map<Edge, Long> audioEdgeCostMap = new HashMap<Edge, Long>();
+		private Map<Edge, Double> audioEdgeCostMap = new HashMap<Edge, Double>();
 
     private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
 		private Long minBandWith;
@@ -116,6 +121,24 @@ public class AudioRouting {
 		private DijkstraShortestPath<Node, Edge> audioShortestPath;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> audioPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+
+		/******************************/
+		private Double aL=0.0;
+		private Double bL=0.0;
+
+		private Double aJ=0.0;
+		private Double bJ=0.0;
+
+		private Double latMin=5.0;
+		private Double jitMin=2.0;
+
+		private Double nsTOms = 1000000.0;
+
+		private Double alpha=0.1;
+		private Double beta=0.5;
+		private Double gamma=0.1;
+		private Double sigma = 0.0;
+		/******************************/
 
 		/*********Statistics Constants**********/
 
@@ -169,7 +192,12 @@ public class AudioRouting {
 			this.minBandWith = minBW;
 
 			this.g = grapho;
+
+			buildAudioParameters();
+
 			buildAudioCostMatrix();
+			this.audioPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+			buildAudioTransformerMap(this.audioEdgeCostMap);
 
 		}
 
@@ -202,6 +230,97 @@ public class AudioRouting {
 		}
 
 		/**
+	  *Function that is called when is necessary evaluate the cost associated to jitter
+	  *in a edge
+	  *@param edge The edge
+	  *@return cost The associated cost
+	  */
+
+	  private Double audioEvaluationJitterCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=10.0;
+
+	    if((maxJitter-minJitter)/nsTOms > jitMin){
+	      if(aJ!=null && bJ!=null && jitterMatrix[i][j]!=null){
+	        cost = jitterMatrix[i][j]*aJ/nsTOms + bJ;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+	    if(aL!=null && aL<1.0){
+	      cost = aL*cost;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when is necessary evaluate the latencyMatrix for an edge
+	  *@param edge The edge
+	  *@return The double value after the process
+	  */
+
+	  private Double audioEvaluationLatencyCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=0.0;
+	    if((maxMediumLatency-minMediumLatency)/nsTOms > latMin){
+	      if(aL!=null && bL!=null && mediumLatencyMatrix[i][j]!=null){
+	        cost = mediumLatencyMatrix[i][j]*aL/nsTOms + bL;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when ins necessary evaluate the loss cost for a edge.
+	  *@param edge The edge
+	  *@return cost The double value (percent)
+	  */
+
+	  private Double audioEvaluationLossCost(Edge edge){
+
+	    Double cost = 0.0;
+	    ArrayList<Long> temp1 = new ArrayList<Long>();
+	    ArrayList<Long> temp2 = new ArrayList<Long>();
+
+	    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+
+	    temp1 = tempStatistics.get(transmitBytes);
+	    temp2 = tempStatistics.get(receiveBytes);
+
+
+	    if( temp1 == null || temp2 == null ){
+	      return cost;
+	    }else{
+	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
+	      Long receive = temp2.get(0);
+
+
+
+	      if(sent!=null && receive!=null){
+	        if(sent>receive){
+	          cost = ((double)sent - (double)receive)*100.0;
+	          cost = cost/(double)sent;
+	        }
+	        else{
+	          return 0.0;
+	        }
+	      }
+
+	    }
+	    return cost;
+	  }
+
+		/**
 	  *This function try to assing a cost for each Edge attending The video factors
 	  *which is different to Standard evaluation
 	  */
@@ -209,7 +328,7 @@ public class AudioRouting {
 	  private void buildAudioCostMatrix(){
 	    int l = this.nodeEdges.size();
 	    int h = this.nodeEdges.size();
-	    this.audioCostMatrix = new Long[l][h];
+	    this.audioCostMatrix = new Double[l][h];
 	    this.audioEdgeCostMap.clear();
 
 	    for(int i=0; i<l; i++){
@@ -217,14 +336,15 @@ public class AudioRouting {
 	      for(int j=0; j<h; j++){
 
 	        if(i==j){
-	          this.audioCostMatrix[i][j]=0L;
+	          this.audioCostMatrix[i][j]=0.0;
 	        }
 	        else if(this.edgeMatrix[i][j]==null){
 	          this.audioCostMatrix[i][j]=null;
 	        }
 	        else{
 
-	          this.audioCostMatrix[i][j] = audioLatencyCost(this.edgeMatrix[i][j])/AUDIOFACTOR;
+	          this.audioCostMatrix[i][j] = alpha*audioEvaluationLatencyCost(this.edgeMatrix[i][j])+
+						beta*audioEvaluationJitterCost(this.edgeMatrix[i][j])+gamma*audioEvaluationLossCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.audioEdgeCostMap.put(this.edgeMatrix[i][j], this.audioCostMatrix[i][j]);
@@ -236,19 +356,123 @@ public class AudioRouting {
 	  }
 
 		/**
+	  *This function build the jitter matrix and the aL, bL, aJ, bJ parameters
+	  */
+
+	  private void buildAudioParameters(){
+
+	    if(this.mediumLatencyMatrix != null){
+
+				this.maxMediumLatency = findMaxMatrix(this.mediumLatencyMatrix);
+				this.minMediumLatency = findMinMatrix(this.mediumLatencyMatrix);
+
+	      if(this.maxMediumLatency!=null && this.minMediumLatency!=null){
+	        Double min = this.minMediumLatency/nsTOms;
+	        Double max = this.maxMediumLatency/nsTOms;
+	        bL = (max - 100.0*min)/(max - min);
+					aL = (1-bL)/min;
+				}
+
+			}
+
+	    createAudioJitterMatrix();
+
+	    if(this.jitterMatrix != null && this.jitterMatrix.length>0){
+
+					this.minJitter = findMinMatrix(this.jitterMatrix);
+					this.maxJitter = findMaxMatrix(this.jitterMatrix);
+
+					if(this.minJitter!=null && this.maxJitter!=null){
+	          Double min = this.minJitter/nsTOms;
+	          Double max = this.maxJitter/nsTOms;
+	          bJ = (max - 100.0*min)/(max - min);
+	          if(bJ!=1){
+	            aJ = (1-bJ)/min;
+	          }else{
+	            aJ = 1.0;
+	          }
+
+					}
+
+				}
+
+	  }
+
+		/**
 	  *Function that is called when is necessary to build the transformer audio for Dijkstra
 	  */
 
-	  private void buildAudioTransformerMap(final Map<Edge, Long> audioEdgeCostMap2){
+	  private void buildAudioTransformerMap(final Map<Edge, Double> audioEdgeCostMap2){
 
-	    this.costAudioTransformer = new Transformer<Edge, Long>(){
-	      public Long transform(Edge e){
+	    this.costAudioTransformer = new Transformer<Edge, Number>(){
+	      public Double transform(Edge e){
 
 	        return audioEdgeCostMap2.get(e);
 	      }
 	    };
 
 	  }
+
+		/**
+		*Function that is called when is neccesary to create the jitter Matrix
+		*/
+
+		private void createAudioJitterMatrix(){
+
+			this.jitterMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+
+			for(int i=0; i<jitterMatrix.length; i++){
+
+				for(int j=0; j<jitterMatrix.length; j++){
+
+					if(this.latencyMatrix[i][j]!=null && this.mediumLatencyMatrix!=null){
+						jitterMatrix[i][j]=Math.abs(this.latencyMatrix[i][j]-this.mediumLatencyMatrix[i][j]);
+					}
+
+				}
+			}
+
+		}
+
+		/**
+		*This function returns the max value in a matrix
+		*@param matrix The matrix
+		*@return The max vale
+		*/
+
+		private Long findMaxMatrix(Long matrix[][]){
+			Long resultado = 0L;
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix.length; j++){
+					if(matrix[i][j]!=null){
+						if(resultado<matrix[i][j]){
+							resultado=matrix[i][j];
+						}
+					}
+				}
+			}
+			return resultado;
+		}
+
+		/**
+		*This function return the min Value in a Matrix
+		*@param matrix The matrix
+		*@return the min value
+		*/
+
+		private Long findMinMatrix(Long matrix[][]){
+			Long resultado = 100000000000L;
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix.length; j++){
+					if(matrix[i][j]!=null){
+						if(resultado>matrix[i][j]){
+							resultado=matrix[i][j];
+						}
+					}
+				}
+			}
+			return resultado;
+		}
 
 		/**
     *This method provide the possibility to get a index for a nodeConnector
@@ -682,9 +906,11 @@ public class AudioRouting {
     *@param minBW The minBW
 		*/
 
-		public void updateAudioCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public void updateAudioCostMatrix(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Map<Edge, Long> bw, Long minBW){
 
+			this.nodeEdges = nodes;
+			this.edgeMatrix = edges;
 			this.latencyMatrix = latencies;
 			this.minLatency = latency;
 			this.mediumLatencyMatrix = medLatencies;
@@ -694,6 +920,7 @@ public class AudioRouting {
       this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
+			buildAudioParameters();
 			buildAudioCostMatrix();
 
 		}

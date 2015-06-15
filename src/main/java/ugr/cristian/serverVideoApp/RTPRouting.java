@@ -99,8 +99,13 @@ public class RTPRouting {
 		private Long minLatency;
 		private Long mediumLatencyMatrix[][];
 		private Long minMediumLatency;
+		private Long maxMediumLatency;
 
-		private Long rtpCostMatrix[][];
+		private Long jitterMatrix[][];
+		private Long maxJitter;
+		private Long minJitter;
+
+		private Double rtpCostMatrix[][];
 
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
@@ -108,7 +113,7 @@ public class RTPRouting {
 		private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
 		private Long minBandWith;
 
-		private Map<Edge, Long> rtpEdgeCostMap = new HashMap<Edge, Long>();
+		private Map<Edge, Double> rtpEdgeCostMap = new HashMap<Edge, Double>();
 
 		private Transformer<Edge, ? extends Number> costRTPTransformer = null;
 
@@ -116,6 +121,24 @@ public class RTPRouting {
 		private DijkstraShortestPath<Node, Edge> rtpShortestPath;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> rtpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+
+		/******************************/
+		private Double aL=0.0;
+		private Double bL=0.0;
+
+		private Double aJ=0.0;
+		private Double bJ=0.0;
+
+		private Double latMin=5.0;
+		private Double jitMin=2.0;
+
+		private Double nsTOms = 1000000.0;
+
+		private Double alpha=0.5;
+		private Double beta=0.4;
+		private Double gamma=0.1;
+		private Double sigma = 0.0;
+		/******************************/
 
 		/*********Statistics Constants**********/
 
@@ -170,8 +193,11 @@ public class RTPRouting {
 
 			this.g = grapho;
 
+			buildRTPParameters();
+			this.rtpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 			buildRTPCostMatrix();
 
+			buildRTPTransformerMap(this.rtpEdgeCostMap);
 		}
 
 		static private InetAddress intToInetAddress(int i) {
@@ -194,7 +220,7 @@ public class RTPRouting {
 	  private void buildRTPCostMatrix(){
 	    int l = this.nodeEdges.size();
 	    int h = this.nodeEdges.size();
-	    this.rtpCostMatrix = new Long[l][h];
+	    this.rtpCostMatrix = new Double[l][h];
 	    this.rtpEdgeCostMap.clear();
 
 	    for(int i=0; i<l; i++){
@@ -202,14 +228,15 @@ public class RTPRouting {
 	      for(int j=0; j<h; j++){
 
 	        if(i==j){
-	          this.rtpCostMatrix[i][j]=0L;
+	          this.rtpCostMatrix[i][j]=0.0;
 	        }
 	        else if(this.edgeMatrix[i][j]==null){
 	          this.rtpCostMatrix[i][j]=null;
 	        }
 	        else{
 
-	          this.rtpCostMatrix[i][j] = rtpBandWithCost(this.edgeMatrix[i][j]);
+	          this.rtpCostMatrix[i][j] = alpha*rtpEvaluationLatencyCost(this.edgeMatrix[i][j]) + beta*rtpEvaluationJitterCost(this.edgeMatrix[i][j])
+						+rtpEvaluationLossCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
@@ -221,19 +248,124 @@ public class RTPRouting {
 	  }
 
 		/**
+	  *This function build the jitter matrix and the aL, bL, aJ, bJ parameters
+	  */
+
+	  private void buildRTPParameters(){
+
+	    if(this.mediumLatencyMatrix != null){
+
+				this.maxMediumLatency = findMaxMatrix(this.mediumLatencyMatrix);
+				this.minMediumLatency = findMinMatrix(this.mediumLatencyMatrix);
+
+	      if(this.maxMediumLatency!=null && this.minMediumLatency!=null){
+	        Double min = this.minMediumLatency/nsTOms;
+	        Double max = this.maxMediumLatency/nsTOms;
+	        bL = (max - 100.0*min)/(max - min);
+					aL = (1-bL)/min;
+				}
+
+			}
+
+	    createICMPJitterMatrix();
+
+	    if(this.jitterMatrix != null && this.jitterMatrix.length>0){
+
+					this.minJitter = findMinMatrix(this.jitterMatrix);
+					this.maxJitter = findMaxMatrix(this.jitterMatrix);
+
+					if(this.minJitter!=null && this.maxJitter!=null){
+	          Double min = this.minJitter/nsTOms;
+	          Double max = this.maxJitter/nsTOms;
+	          bJ = (max - 100.0*min)/(max - min);
+	          if(bJ!=1){
+	            aJ = (1-bJ)/min;
+	          }else{
+	            aJ = 1.0;
+	          }
+
+					}
+
+				}
+
+	  }
+
+		/**
 	  *Function that is called when is necessary to build the transformer rtp for Dijkstra
 	  */
 
-	  private void buildRTPTransformerMap(final Map<Edge, Long> rtpEdgeCostMap2){
+	  private void buildRTPTransformerMap(final Map<Edge, Double> rtpEdgeCostMap2){
 
-	    this.costRTPTransformer = new Transformer<Edge, Long>(){
-	      public Long transform(Edge e){
+	    this.costRTPTransformer = new Transformer<Edge, Number>(){
+	      public Double transform(Edge e){
 
 	        return rtpEdgeCostMap2.get(e);
 	      }
 	    };
 
 	  }
+
+		/**
+	  *Function that is called when is neccesary to create the jitter Matrix
+	  */
+
+	  private void createICMPJitterMatrix(){
+
+	    this.jitterMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+
+	    for(int i=0; i<jitterMatrix.length; i++){
+
+				for(int j=0; j<jitterMatrix.length; j++){
+
+					if(this.latencyMatrix[i][j]!=null && this.mediumLatencyMatrix!=null){
+						jitterMatrix[i][j]=Math.abs(this.latencyMatrix[i][j]-this.mediumLatencyMatrix[i][j]);
+					}
+
+				}
+			}
+
+	  }
+
+		/**
+	  *This function returns the max value in a matrix
+	  *@param matrix The matrix
+	  *@return The max vale
+	  */
+
+	  private Long findMaxMatrix(Long matrix[][]){
+	    Long resultado = 0L;
+	    for(int i=0; i<matrix.length; i++){
+	      for(int j=0; j<matrix.length; j++){
+	        if(matrix[i][j]!=null){
+	          if(resultado<matrix[i][j]){
+	            resultado=matrix[i][j];
+	          }
+	        }
+	      }
+	    }
+	    return resultado;
+	  }
+
+	  /**
+	  *This function return the min Value in a Matrix
+	  *@param matrix The matrix
+	  *@return the min value
+	  */
+
+	  private Long findMinMatrix(Long matrix[][]){
+	    Long resultado = 100000000000L;
+	    for(int i=0; i<matrix.length; i++){
+	      for(int j=0; j<matrix.length; j++){
+	        if(matrix[i][j]!=null){
+	          if(resultado>matrix[i][j]){
+	            resultado=matrix[i][j];
+	          }
+	        }
+	      }
+	    }
+	    return resultado;
+	  }
+
 
 		/**
     *This method provide the possibility to get a index for a nodeConnector
@@ -452,6 +584,97 @@ public class RTPRouting {
 			}
 			return result;
 		}
+
+		/**
+	  *Function that is called when is necessary evaluate the cost associated to jitter
+	  *in a edge
+	  *@param edge The edge
+	  *@return cost The associated cost
+	  */
+
+	  private Double rtpEvaluationJitterCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=10.0;
+
+	    if((maxJitter-minJitter)/nsTOms > jitMin){
+	      if(aJ!=null && bJ!=null && jitterMatrix[i][j]!=null){
+	        cost = jitterMatrix[i][j]*aJ/nsTOms + bJ;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+	    if(aL!=null && aL<1.0){
+	      cost = aL*cost;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when is necessary evaluate the latencyMatrix for an edge
+	  *@param edge The edge
+	  *@return The double value after the process
+	  */
+
+	  private Double rtpEvaluationLatencyCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=0.0;
+	    if((maxMediumLatency-minMediumLatency)/nsTOms > latMin){
+	      if(aL!=null && bL!=null && mediumLatencyMatrix[i][j]!=null){
+	        cost = mediumLatencyMatrix[i][j]*aL/nsTOms + bL;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when ins necessary evaluate the loss cost for a edge.
+	  *@param edge The edge
+	  *@return cost The double value (percent)
+	  */
+
+	  private Double rtpEvaluationLossCost(Edge edge){
+
+	    Double cost = 0.0;
+	    ArrayList<Long> temp1 = new ArrayList<Long>();
+	    ArrayList<Long> temp2 = new ArrayList<Long>();
+
+	    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+
+	    temp1 = tempStatistics.get(transmitBytes);
+	    temp2 = tempStatistics.get(receiveBytes);
+
+
+	    if( temp1 == null || temp2 == null ){
+	      return cost;
+	    }else{
+	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
+	      Long receive = temp2.get(0);
+
+
+
+	      if(sent!=null && receive!=null){
+	        if(sent>receive){
+	          cost = ((double)sent - (double)receive)*100.0;
+	          cost = cost/(double)sent;
+	        }
+	        else{
+	          return 0.0;
+	        }
+	      }
+
+	    }
+	    return cost;
+	  }
 
 		/**
 		*Function that is called when we pretend to show in log all the elements of a Matrix
@@ -724,9 +947,11 @@ public class RTPRouting {
 		*@param minBW The minBW
 		*/
 
-		public void updateRTPCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public void updateRTPCostMatrix(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Map<Edge, Long> bw, Long minBW){
 
+			this.nodeEdges = nodes;
+			this.edgeMatrix = edges;
 			this.latencyMatrix = latencies;
 			this.minLatency = latency;
 			this.mediumLatencyMatrix = medLatencies;
@@ -736,6 +961,7 @@ public class RTPRouting {
 			this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
+			buildRTPParameters();
 			buildRTPCostMatrix();
 
 		}

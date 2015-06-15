@@ -132,9 +132,9 @@ public class ICMPRouting {
 
   private Double nsTOms = 1000000.0;
 
-  private Double alpha=0.5;
-  private Double beta=0.5;
-  private Double gamma=0.0;
+  private Double alpha=0.7;
+  private Double beta=0.1;
+  private Double gamma=0.2;
   private Double sigma = 0.0;
   /******************************/
 
@@ -215,9 +215,10 @@ public class ICMPRouting {
             this.icmpCostMatrix[i][j]=null;
           }
           else{
-              Double temp = alpha*icmpEvaluationLatencyCost(this.edgeMatrix[i][j]); //+  beta*icmpEvaluationJitterCost(this.edgeMatrix[i][j]);
+              Double temp = alpha*icmpEvaluationLatencyCost(this.edgeMatrix[i][j]) + beta*icmpEvaluationJitterCost(this.edgeMatrix[i][j])+
+              gamma*icmpEvaluationLossCost(this.edgeMatrix[i][j]);
 
-              if(temp == 0.0 || temp== null){
+              if(temp == 0.0 || temp == null){
                 this.icmpCostMatrix[i][j]=10.0;
               }else{
                 this.icmpCostMatrix[i][j]=temp;
@@ -377,7 +378,7 @@ public class ICMPRouting {
 
     Double cost=10.0;
 
-    if((maxJitter-minJitter)/nsTOms > latMin){
+    if((maxJitter-minJitter)/nsTOms > jitMin){
       if(aJ!=null && bJ!=null && jitterMatrix[i][j]!=null){
         cost = jitterMatrix[i][j]*aJ/nsTOms + bJ;
       }
@@ -385,10 +386,8 @@ public class ICMPRouting {
     else{
       cost = 10.0;
     }
-    if(aL!=null){
+    if(aL!=null && aL<1.0){
       cost = aL*cost;
-    }else{
-      cost=cost/5.0;
     }
 
     return cost;
@@ -405,9 +404,6 @@ public class ICMPRouting {
     int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
 
     Double cost=0.0;
-    log.debug(""+(maxMediumLatency-minMediumLatency)/nsTOms);
-    log.debug(""+maxMediumLatency);
-    log.debug(""+minMediumLatency);
     if((maxMediumLatency-minMediumLatency)/nsTOms > latMin){
       if(aL!=null && bL!=null && mediumLatencyMatrix[i][j]!=null){
         cost = mediumLatencyMatrix[i][j]*aL/nsTOms + bL;
@@ -437,16 +433,22 @@ public class ICMPRouting {
     temp1 = tempStatistics.get(transmitBytes);
     temp2 = tempStatistics.get(receiveBytes);
 
+
     if( temp1 == null || temp2 == null ){
       return cost;
     }else{
       Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
       Long receive = temp2.get(0);
 
+
+
       if(sent!=null && receive!=null){
         if(sent>receive){
           cost = ((double)sent - (double)receive)*100.0;
           cost = cost/(double)sent;
+        }
+        else{
+          return 0.0;
         }
       }
 
@@ -593,6 +595,23 @@ public class ICMPRouting {
     }
 
     return definitivePath;
+
+  }
+
+  /**
+  *Function that is called when we pretend to show in log all the elements of a Matrix
+  *@matrix[][] The matrix
+  */
+
+  private void traceEdgeMatrix(Edge matrix[][]){
+
+    for(int i=0; i<matrix.length; i++){
+      for(int j=0; j<matrix[i].length; j++){
+
+        log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+      }
+    }
 
   }
 
@@ -828,9 +847,11 @@ public class ICMPRouting {
 	*@param max The maximum statistics
 	*/
 
-	public void updateStandardCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+	public void updateStandardCostMatrix(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 	ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max){
 
+    this.nodeEdges = nodes;
+    this.edgeMatrix = edges;
 		this.latencyMatrix = latencies;
 		this.minLatency = latency;
 		this.mediumLatencyMatrix = medLatencies;

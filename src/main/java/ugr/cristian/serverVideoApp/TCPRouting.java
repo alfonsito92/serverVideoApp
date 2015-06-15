@@ -63,7 +63,6 @@ import org.opendaylight.controller.sal.packet.Ethernet;
 import org.opendaylight.controller.sal.packet.IDataPacketService;
 import org.opendaylight.controller.sal.packet.IListenDataPacket;
 import org.opendaylight.controller.sal.packet.IPv4;
-import org.opendaylight.controller.sal.packet.ICMP;
 import org.opendaylight.controller.sal.packet.TCP;
 import org.opendaylight.controller.sal.packet.UDP;
 import org.opendaylight.controller.sal.packet.Packet;
@@ -99,8 +98,13 @@ public class TCPRouting {
 		private Long minLatency;
 		private Long mediumLatencyMatrix[][];
 		private Long minMediumLatency;
+		private Long maxMediumLatency;
 
-		private Long tcpCostMatrix[][];
+		private Long jitterMatrix[][];
+		private Long minJitter;
+		private Long maxJitter;
+
+		private Double tcpCostMatrix[][];
 
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
@@ -108,7 +112,7 @@ public class TCPRouting {
 		private Map<Edge, Long> edgeBandWith = new HashMap<Edge, Long>();
 		private Long minBandWith;
 
-		private Map<Edge, Long> tcpEdgeCostMap = new HashMap<Edge, Long>();
+		private Map<Edge, Double> tcpEdgeCostMap = new HashMap<Edge, Double>();
 
 		private Transformer<Edge, ? extends Number> costTCPTransformer = null;
 
@@ -116,6 +120,24 @@ public class TCPRouting {
 		private DijkstraShortestPath<Node, Edge> tcpShortestPath;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> tcpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+
+		/******************************/
+		private Double aL=0.0;
+		private Double bL=0.0;
+
+		private Double aJ=0.0;
+		private Double bJ=0.0;
+
+		private Double latMin=5.0;
+		private Double jitMin=2.0;
+
+		private Double nsTOms = 1000000.0;
+
+		private Double alpha=0.2;
+		private Double beta=0.1;
+		private Double gamma=0.7;
+		private Double sigma = 0.0;
+		/******************************/
 
 		/*********Statistics Constants**********/
 
@@ -165,8 +187,11 @@ public class TCPRouting {
 			this.minBandWith = minBW;
 
 			this.g = grapho;
+			buildTCPParameters();
 
 			buildTCPCostMatrix();
+			this.tcpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
+			buildTCPTransformerMap(this.tcpEdgeCostMap);
 
 		}
 
@@ -190,7 +215,7 @@ public class TCPRouting {
 	  private void buildTCPCostMatrix(){
 	    int l = this.nodeEdges.size();
 	    int h = this.nodeEdges.size();
-	    this.tcpCostMatrix = new Long[l][h];
+	    this.tcpCostMatrix = new Double[l][h];
 	    this.tcpEdgeCostMap.clear();
 
 	    for(int i=0; i<l; i++){
@@ -198,14 +223,15 @@ public class TCPRouting {
 	      for(int j=0; j<h; j++){
 
 	        if(i==j){
-	          this.tcpCostMatrix[i][j]=0L;
+	          this.tcpCostMatrix[i][j]=0.0;
 	        }
 	        else if(this.edgeMatrix[i][j]==null){
 	          this.tcpCostMatrix[i][j]=null;
 	        }
 	        else{
 
-	          this.tcpCostMatrix[i][j] = tcpLossCost(this.edgeMatrix[i][j]);
+	          this.tcpCostMatrix[i][j] = alpha*tcpEvaluationLatencyCost(this.edgeMatrix[i][j])+beta*tcpEvaluationJitterCost(this.edgeMatrix[i][j])+
+						gamma*this.tcpEvaluationLossCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.tcpEdgeCostMap.put(this.edgeMatrix[i][j], this.tcpCostMatrix[i][j]);
@@ -217,19 +243,123 @@ public class TCPRouting {
 	  }
 
 		/**
+		*This function build the jitter matrix and the aL, bL, aJ, bJ parameters
+		*/
+
+		private void buildTCPParameters(){
+
+			if(this.mediumLatencyMatrix != null){
+
+				this.maxMediumLatency = findMaxMatrix(this.mediumLatencyMatrix);
+				this.minMediumLatency = findMinMatrix(this.mediumLatencyMatrix);
+
+				if(this.maxMediumLatency!=null && this.minMediumLatency!=null){
+					Double min = this.minMediumLatency/nsTOms;
+					Double max = this.maxMediumLatency/nsTOms;
+					bL = (max - 100.0*min)/(max - min);
+					aL = (1-bL)/min;
+				}
+
+			}
+
+			createTCPJitterMatrix();
+
+			if(this.jitterMatrix != null && this.jitterMatrix.length>0){
+
+					this.minJitter = findMinMatrix(this.jitterMatrix);
+					this.maxJitter = findMaxMatrix(this.jitterMatrix);
+
+					if(this.minJitter!=null && this.maxJitter!=null){
+						Double min = this.minJitter/nsTOms;
+						Double max = this.maxJitter/nsTOms;
+						bJ = (max - 100.0*min)/(max - min);
+						if(bJ!=1){
+							aJ = (1-bJ)/min;
+						}else{
+							aJ = 1.0;
+						}
+
+					}
+
+				}
+
+		}
+
+		/**
 	  *Function that is called when is necessary to build the transformer tcp for Dijkstra
 	  */
 
-	  private void buildTCPTransformerMap(final Map<Edge, Long> tcpEdgeCostMap2){
+	  private void buildTCPTransformerMap(final Map<Edge, Double> tcpEdgeCostMap2){
 
-	    this.costTCPTransformer = new Transformer<Edge, Long>(){
-	      public Long transform(Edge e){
+	    this.costTCPTransformer = new Transformer<Edge, Number>(){
+	      public Double transform(Edge e){
 
 	        return tcpEdgeCostMap2.get(e);
 	      }
 	    };
 
 	  }
+
+		/**
+		*Function that is called when is neccesary to create the jitter Matrix
+		*/
+
+		private void createTCPJitterMatrix(){
+
+			this.jitterMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+
+			for(int i=0; i<jitterMatrix.length; i++){
+
+				for(int j=0; j<jitterMatrix.length; j++){
+
+					if(this.latencyMatrix[i][j]!=null && this.mediumLatencyMatrix!=null){
+						jitterMatrix[i][j]=Math.abs(this.latencyMatrix[i][j]-this.mediumLatencyMatrix[i][j]);
+					}
+
+				}
+			}
+
+		}
+
+		/**
+		*This function returns the max value in a matrix
+		*@param matrix The matrix
+		*@return The max vale
+		*/
+
+		private Long findMaxMatrix(Long matrix[][]){
+			Long resultado = 0L;
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix.length; j++){
+					if(matrix[i][j]!=null){
+						if(resultado<matrix[i][j]){
+							resultado=matrix[i][j];
+						}
+					}
+				}
+			}
+			return resultado;
+		}
+
+		/**
+		*This function return the min Value in a Matrix
+		*@param matrix The matrix
+		*@return the min value
+		*/
+
+		private Long findMinMatrix(Long matrix[][]){
+			Long resultado = 100000000000L;
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix.length; j++){
+					if(matrix[i][j]!=null){
+						if(resultado>matrix[i][j]){
+							resultado=matrix[i][j];
+						}
+					}
+				}
+			}
+			return resultado;
+		}
 
 		/**
     *This method provide the possibility to get a index for a nodeConnector
@@ -337,6 +467,98 @@ public class TCPRouting {
       return definitivePath;
 
     }
+
+		/**
+	  *Function that is called when is necessary evaluate the cost associated to jitter
+	  *in a edge
+	  *@param edge The edge
+	  *@return cost The associated cost
+	  */
+
+	  private Double tcpEvaluationJitterCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=10.0;
+
+	    if((maxJitter-minJitter)/nsTOms > jitMin){
+	      if(aJ!=null && bJ!=null && jitterMatrix[i][j]!=null){
+	        cost = jitterMatrix[i][j]*aJ/nsTOms + bJ;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+	    if(aL!=null && aL<1.0){
+	      cost = aL*cost;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when is necessary evaluate the latencyMatrix for an edge
+	  *@param edge The edge
+	  *@return The double value after the process
+	  */
+
+	  private Double tcpEvaluationLatencyCost(Edge edge){
+	    int i = getNodeConnectorIndex(edge.getTailNodeConnector());
+	    int j = getNodeConnectorIndex(edge.getHeadNodeConnector());
+
+	    Double cost=0.0;
+	    if((maxMediumLatency-minMediumLatency)/nsTOms > latMin){
+	      if(aL!=null && bL!=null && mediumLatencyMatrix[i][j]!=null){
+	        cost = mediumLatencyMatrix[i][j]*aL/nsTOms + bL;
+	      }
+	    }
+	    else{
+	      cost = 10.0;
+	    }
+
+	    return cost;
+	  }
+
+	  /**
+	  *This function is called when ins necessary evaluate the loss cost for a edge.
+	  *@param edge The edge
+	  *@return cost The double value (percent)
+	  */
+
+	  private Double tcpEvaluationLossCost(Edge edge){
+
+	    Double cost = 0.0;
+	    ArrayList<Long> temp1 = new ArrayList<Long>();
+	    ArrayList<Long> temp2 = new ArrayList<Long>();
+
+	    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
+
+	    temp1 = tempStatistics.get(transmitBytes);
+	    temp2 = tempStatistics.get(receiveBytes);
+
+
+	    if( temp1 == null || temp2 == null ){
+	      return cost;
+	    }else{
+	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
+	      Long receive = temp2.get(0);
+
+
+
+	      if(sent!=null && receive!=null){
+	        if(sent>receive){
+	          cost = ((double)sent - (double)receive)*100.0;
+	          cost = cost/(double)sent;
+	        }
+	        else{
+	          return 0.0;
+	        }
+	      }
+
+	    }
+	    return cost;
+	  }
+
 
 		/**
     *This function is called when is necessary evaluate the latencyMatrix for an edge and
@@ -730,9 +952,11 @@ public class TCPRouting {
 		*@param minBW The minBW
 		*/
 
-		public void updateTCPCostMatrix(Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
+		public void updateTCPCostMatrix(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
 		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Map<Edge, Long> bw, Long minBW){
 
+			this.nodeEdges = nodes;
+			this.edgeMatrix = edges;
 			this.latencyMatrix = latencies;
 			this.minLatency = latency;
 			this.mediumLatencyMatrix = medLatencies;
@@ -742,6 +966,7 @@ public class TCPRouting {
 			this.edgeBandWith = bw;
 			this.minBandWith = minBW;
 
+			buildTCPParameters();
 			buildTCPCostMatrix();
 		}
 }
