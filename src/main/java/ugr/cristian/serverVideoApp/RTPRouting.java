@@ -134,9 +134,9 @@ public class RTPRouting {
 
 		private Double nsTOms = 1000000.0;
 
-		private Double alpha=0.5;
-		private Double beta=0.4;
-		private Double gamma=0.1;
+		private Double alpha=0.1;
+		private Double beta=0.5;
+		private Double gamma=10;
 		private Double sigma = 0.0;
 		/******************************/
 
@@ -677,6 +677,23 @@ public class RTPRouting {
 	  }
 
 		/**
+		*Function that is called when we pretend to show in log all the elements of a Double Matrix
+		*@param matrix[][] The matrix
+		*/
+
+		private void traceDoubleMatrix(Double matrix[][]){
+
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix[i].length; j++){
+
+					log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+				}
+			}
+
+		}
+
+		/**
 		*Function that is called when we pretend to show in log all the elements of a Matrix
 		*@matrix[][] The matrix
 		*/
@@ -963,6 +980,9 @@ public class RTPRouting {
 
 			buildRTPParameters();
 			buildRTPCostMatrix();
+
+			log.debug("Matriz de costes RTP video");
+			traceDoubleMatrix(this.rtpCostMatrix);
 
 		}
 }

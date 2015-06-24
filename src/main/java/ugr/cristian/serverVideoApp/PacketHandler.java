@@ -125,8 +125,8 @@ public class PacketHandler implements IListenDataPacket {
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
-  private short idleTimeOut = 30;
-  private short hardTimeOut = 3600;
+  private short idleTimeOut = 20;
+  private short hardTimeOut = 30;
 
   private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
 
@@ -151,7 +151,7 @@ public class PacketHandler implements IListenDataPacket {
   /*************************************/
   private int flood = 0;
 
-  private int MAXFLOODPACKET = 20;
+  private int MAXFLOODPACKET = 30;
 
   /*************************************/
   private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
@@ -2096,7 +2096,7 @@ public class PacketHandler implements IListenDataPacket {
 
       if(this.nodeEdges.isEmpty() || !this.nodeEdges.equals(edges) || this.nodeEdges == null){
 
-        MAXFLOODPACKET = 6*this.nodeEdges.size();
+        MAXFLOODPACKET = 100*this.nodeEdges.size();
 
         this.packetTime.clear();
         this.edgePackets.clear();

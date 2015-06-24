@@ -133,9 +133,9 @@ public class TCPRouting {
 
 		private Double nsTOms = 1000000.0;
 
-		private Double alpha=0.2;
-		private Double beta=0.1;
-		private Double gamma=0.7;
+		private Double alpha=0.1;
+		private Double beta=0.5;
+		private Double gamma=5;
 		private Double sigma = 0.0;
 		/******************************/
 
@@ -730,6 +730,23 @@ public class TCPRouting {
 		}
 
 		/**
+		*Function that is called when we pretend to show in log all the elements of a Double Matrix
+		*@param matrix[][] The matrix
+		*/
+
+		private void traceDoubleMatrix(Double matrix[][]){
+
+			for(int i=0; i<matrix.length; i++){
+				for(int j=0; j<matrix[i].length; j++){
+
+					log.debug("Element "+i+ " "+j+" is: "+matrix[i][j]);
+
+				}
+			}
+
+		}
+
+		/**
 		*Function that is called when we pretend to show in log all the elements of a Matrix
 		*@matrix[][] The matrix
 		*/
@@ -968,5 +985,7 @@ public class TCPRouting {
 
 			buildTCPParameters();
 			buildTCPCostMatrix();
+			log.debug("Matriz de costes TCP");
+			traceDoubleMatrix(this.tcpCostMatrix);
 		}
 }
