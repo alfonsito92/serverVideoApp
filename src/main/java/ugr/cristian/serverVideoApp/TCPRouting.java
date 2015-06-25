@@ -135,7 +135,7 @@ public class TCPRouting {
 
 		private Double alpha=0.1;
 		private Double beta=0.5;
-		private Double gamma=5;
+		private Double gamma=5.0;
 		private Double sigma = 0.0;
 		/******************************/
 
@@ -985,7 +985,7 @@ public class TCPRouting {
 
 			buildTCPParameters();
 			buildTCPCostMatrix();
-			log.debug("Matriz de costes TCP");
-			traceDoubleMatrix(this.tcpCostMatrix);
+			//log.debug("Matriz de costes TCP");
+			//traceDoubleMatrix(this.tcpCostMatrix);
 		}
 }

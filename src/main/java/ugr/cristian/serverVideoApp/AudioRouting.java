@@ -134,9 +134,9 @@ public class AudioRouting {
 
 		private Double nsTOms = 1000000.0;
 
-		private Double alpha=1;
-		private Double beta=1;
-		private Double gamma=10;
+		private Double alpha=1.0;
+		private Double beta=1.0;
+		private Double gamma=10.0;
 		private Double sigma = 0.0;
 		/******************************/
 
@@ -939,8 +939,8 @@ public class AudioRouting {
 
 			buildAudioParameters();
 			buildAudioCostMatrix();
-			log.debug("Matriz de costes de audio");
-			traceDoubleMatrix(this.audioCostMatrix);
+			//log.debug("Matriz de costes de audio");
+			//traceDoubleMatrix(this.audioCostMatrix);
 		}
 
   }

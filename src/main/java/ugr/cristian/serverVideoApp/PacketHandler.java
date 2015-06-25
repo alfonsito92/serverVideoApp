@@ -143,8 +143,10 @@ public class PacketHandler implements IListenDataPacket {
   private final String receiveDropBytes = "Receive Drop Bytes";
   private final String transmitErrorBytes = "Transmit Error Bytes";
   private final String receiveErrorBytes = "Receive Error Bytes";
+  private final String transmitPackets = "Transmits Packets";
+  private final String receivePackets = "Receive Packets";
   private final String[] statisticsName = {transmitBytes, receiveBytes, transmitDropBytes,
-  receiveDropBytes, transmitErrorBytes, receiveErrorBytes};
+  receiveDropBytes, transmitErrorBytes, receiveErrorBytes, transmitPackets, receivePackets};
 
   /***************************************/
 
@@ -1767,7 +1769,26 @@ public class PacketHandler implements IListenDataPacket {
       compareStatistic(m1, m2, receiveErrorBytes);
 
       tempMap.put(receiveErrorBytes, tempArray);
+
       ///////////////////////////////////////
+      tempArray=new ArrayList<Long>();
+      m1=headStatistics.getTransmitPacketCount();
+      m2=tailStatistics.getTransmitPacketCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+
+      tempMap.put(transmitPackets, tempArray);
+
+      ///////////////////////////////////////
+      tempArray=new ArrayList<Long>();
+      m1=headStatistics.getReceivePacketCount();
+      m2=tailStatistics.getReceivePacketCount();
+      tempArray.add(m1);
+      tempArray.add(m2);
+
+      tempMap.put(receivePackets, tempArray);
+      ///////////////////////////////////////
+
       this.edgeStatistics.put(edge, tempMap);
 
     }
@@ -1898,6 +1919,33 @@ public class PacketHandler implements IListenDataPacket {
       initializeEdgeMediumTime();
     }
 
+
+    private void resetStatistics(){
+      this.edgeStatistics.clear();
+      Set<Node> tempNodes = this.nodeEdges.keySet();
+      for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
+        Node tempNode = it.next();
+        Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
+          for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
+            Edge tempEdge = it2.next();
+              resetNodeConnectorStatistics(tempEdge);
+          }
+
+      }
+    }
+
+    private void resetNodeConnectorStatistics(Edge edge){
+      NodeConnector head = edge.getHeadNodeConnector();
+      NodeConnector tail = edge.getTailNodeConnector();
+
+      NodeConnectorStatistics headStatistics = this.statisticsManager.getNodeConnectorStatistics(head);
+      NodeConnectorStatistics tailStatistics = this.statisticsManager.getNodeConnectorStatistics(tail);
+
+      headStatistics.setReceiveByteCount(0L);
+      tailStatistics.setTransmitByteCount(0L);
+      headStatistics.setReceivePacketCount(0L);
+      tailStatistics.setTransmitPacketCount(0L);
+    }
     /**
     *This function reset the routing protocols
     */
@@ -2096,7 +2144,7 @@ public class PacketHandler implements IListenDataPacket {
 
       if(this.nodeEdges.isEmpty() || !this.nodeEdges.equals(edges) || this.nodeEdges == null){
 
-        MAXFLOODPACKET = 100*this.nodeEdges.size();
+        MAXFLOODPACKET = 60*this.nodeEdges.size();
 
         this.packetTime.clear();
         this.edgePackets.clear();
@@ -2116,6 +2164,8 @@ public class PacketHandler implements IListenDataPacket {
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
+
+        //resetStatistics();
 
         updateEdgeStatistics();
 

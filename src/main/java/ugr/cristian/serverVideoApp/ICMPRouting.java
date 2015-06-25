@@ -132,9 +132,9 @@ public class ICMPRouting {
 
   private Double nsTOms = 1000000.0;
 
-  private Double alpha=1;
-  private Double beta=1;
-  private Double gamma=5;
+  private Double alpha=1.0;
+  private Double beta=1.0;
+  private Double gamma=5.0;
   private Double sigma = 0.0;
   /******************************/
 
@@ -864,8 +864,8 @@ public class ICMPRouting {
 
 		buildICMPCostMatrix();
 
-    log.debug("Matriz de costes ICMP");
-    traceDoubleMatrix(this.icmpCostMatrix);
+    //log.debug("Matriz de costes ICMP");
+    //traceDoubleMatrix(this.icmpCostMatrix);
 	}
 
 	/**

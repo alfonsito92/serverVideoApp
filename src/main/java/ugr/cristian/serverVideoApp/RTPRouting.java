@@ -135,8 +135,8 @@ public class RTPRouting {
 		private Double nsTOms = 1000000.0;
 
 		private Double alpha=0.1;
-		private Double beta=0.5;
-		private Double gamma=10;
+		private Double beta=0.1;
+		private Double gamma=10.0;
 		private Double sigma = 0.0;
 		/******************************/
 
@@ -148,8 +148,10 @@ public class RTPRouting {
 		private final String receiveDropBytes = "Receive Drop Bytes";
 		private final String transmitErrorBytes = "Transmit Error Bytes";
 		private final String receiveErrorBytes = "Receive Error Bytes";
+		private final String transmitPackets = "Transmits Packets";
+		private final String receivePackets = "Receive Packets";
 		private final String[] statisticsName = {transmitBytes, receiveBytes, transmitDropBytes,
-		receiveDropBytes, transmitErrorBytes, receiveErrorBytes};
+		receiveDropBytes, transmitErrorBytes, receiveErrorBytes, transmitPackets, receivePackets};
 
 		/***************************************/
 
@@ -236,7 +238,7 @@ public class RTPRouting {
 	        else{
 
 	          this.rtpCostMatrix[i][j] = alpha*rtpEvaluationLatencyCost(this.edgeMatrix[i][j]) + beta*rtpEvaluationJitterCost(this.edgeMatrix[i][j])
-						+rtpEvaluationLossCost(this.edgeMatrix[i][j]);
+						+gamma*rtpEvaluationLossCost(this.edgeMatrix[i][j]);
 	        }
 
 	        this.rtpEdgeCostMap.put(this.edgeMatrix[i][j], this.rtpCostMatrix[i][j]);
@@ -650,8 +652,8 @@ public class RTPRouting {
 
 	    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
 
-	    temp1 = tempStatistics.get(transmitBytes);
-	    temp2 = tempStatistics.get(receiveBytes);
+	    temp1 = tempStatistics.get(transmitPackets);
+	    temp2 = tempStatistics.get(receivePackets);
 
 
 	    if( temp1 == null || temp2 == null ){
@@ -659,9 +661,7 @@ public class RTPRouting {
 	    }else{
 	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
 	      Long receive = temp2.get(0);
-
-
-
+				log.debug("sent "+sent+" receive "+receive);
 	      if(sent!=null && receive!=null){
 	        if(sent>receive){
 	          cost = ((double)sent - (double)receive)*100.0;
@@ -673,6 +673,7 @@ public class RTPRouting {
 	      }
 
 	    }
+			log.debug("Pérdidas RTP para el enlace "+edge+": "+cost);
 	    return cost;
 	  }
 
@@ -981,8 +982,8 @@ public class RTPRouting {
 			buildRTPParameters();
 			buildRTPCostMatrix();
 
-			log.debug("Matriz de costes RTP video");
-			traceDoubleMatrix(this.rtpCostMatrix);
+			//log.debug("Matriz de costes RTP video");
+			//traceDoubleMatrix(this.rtpCostMatrix);
 
 		}
 }
