@@ -514,65 +514,64 @@ public class ICMPRouting {
   */
 
   private List<Edge> reordenateList(List<Edge> path, Node srcNode, Node dstNode){
-    boolean orden = true;
-    boolean orientacion = true;
 
     List<Edge> result = new ArrayList();
     List<Edge> definitivePath = new ArrayList();
+    //log.debug("path(0) "+path.get(0)+" head "+path.get(0).getHeadNodeConnector().getNode()+
+    //" tail " +path.get(0).getTailNodeConnector().getNode());
+    result = path;
 
-    if(path.get(0).getTailNodeConnector().getNode().equals(srcNode)){
-      orden=true;
-      orientacion=true;
-    }
-    else if(path.get(0).getHeadNodeConnector().getNode().equals(srcNode)){
-      orden=true;
-      orientacion=false;
-    }
-    else if(path.get(path.size()-1).getTailNodeConnector().getNode().equals(srcNode)){
-      orden=false;
-      orientacion=true;
-    }
-    else if(path.get(path.size()-1).getHeadNodeConnector().getNode().equals(srcNode)){
-      orden=false;
-      orientacion=false;
-    }
-
-    int i=0;
-    int n1=0;
-    int n2=0;
-
-    if(!orden){
-      i=path.size()-1;
-    }
-    int index;
-    for(int j=0; j<path.size();j++){
-
-      if(!orden){
-        index=i-j;
+    for (int i = 0; i<path.size(); i++){
+      if(result.get(i).getTailNodeConnector().getNode().equals(srcNode)){
+        definitivePath.add(path.get(i));
+        result.remove(i);
+        break;
       }
-      else{
-        index=j;
+      else if(result.get(i).getHeadNodeConnector().getNode().equals(srcNode)){
+        Edge temp = result.get(i);
+        int aux1 = getNodeConnectorIndex(temp.getHeadNodeConnector());
+        int aux2 = getNodeConnectorIndex(temp.getTailNodeConnector());
+        definitivePath.add(this.edgeMatrix[aux1][aux2]);
+        result.remove(i);
+        break;
       }
+    }
 
-      Edge tempEdge = path.get(index);
+    while(result.size()!=0){
 
-      if(!orientacion){
-        n1=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
-        n2=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
+      int i=0;
+
+      Edge tempEdge = result.get(i);
+      int tempSize = definitivePath.size();
+      if(tempSize>0){
+        Edge tempEdge2 = definitivePath.get(tempSize-1);
+        Node nodeHeadPrevious = tempEdge2.getHeadNodeConnector().getNode();
+
+        Node tempNode1 = tempEdge.getHeadNodeConnector().getNode();
+        Node tempNode2 = tempEdge.getTailNodeConnector().getNode();
+
+        if(nodeHeadPrevious.equals(tempNode2)){
+          definitivePath.add(tempEdge);
+          result.remove(i);
+          i=0;
+        }else if(nodeHeadPrevious.equals(tempNode1)){
+          int aux1 = getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+          int aux2 = getNodeConnectorIndex(tempEdge.getTailNodeConnector());
+
+          definitivePath.add(this.edgeMatrix[aux1][aux2]);
+          result.remove(i);
+          i=0;
+        }
       }else{
-        n1=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
-        n2=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+        return null;
       }
-      result.add(this.edgeMatrix[n1][n2]);
+      i++;
     }
 
     ////////////////////////
     //Better reordenating
     ///////////////////////
-
-    definitivePath.add(result.get(0));
-
-
+/*
     for(int j=1; j<result.size(); j++){
 
       Edge tempEdge2 = result.get(j);
@@ -582,7 +581,6 @@ public class ICMPRouting {
       Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
 
       Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
-
 
       if(tempNode1.equals(tempNode2)){
         definitivePath.add(result.get(j));
@@ -595,7 +593,8 @@ public class ICMPRouting {
     }
 
     return definitivePath;
-
+*/
+return definitivePath;
   }
 
   /**
@@ -677,15 +676,16 @@ public class ICMPRouting {
 			tempPath = icmpShortestPath.getPath(srcNode, dstNode);
 			this.icmpPathMap.put(tempMap, tempPath);
 
-    boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
-
-    if(!temp){
+    //boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
+    log.debug("tempPath "+tempPath);
+    //if(!temp){
       definitivePath = reordenateList(tempPath, srcNode, dstNode);
-    }
-    else{
-      definitivePath = tempPath;
-    }
-
+    //}
+    //else{
+      //definitivePath = tempPath;
+    //}
+    log.debug("srcNode "+srcNode+" dstNode "+dstNode);
+    log.debug("path "+definitivePath);
 		return definitivePath;
 
 	}

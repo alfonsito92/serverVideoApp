@@ -107,6 +107,8 @@ public class RTPRouting {
 
 		private Double rtpCostMatrix[][];
 
+		public boolean resetThings = false;
+
 		private ConcurrentMap<Edge, Map<String, ArrayList>> edgeStatistics = new ConcurrentHashMap<Edge, Map<String, ArrayList>>();
 	  private Map<String, Long> maxStatistics = new HashMap<String, Long>();
 
@@ -119,6 +121,8 @@ public class RTPRouting {
 
 		private Graph<Node, Edge> g = new SparseMultigraph();
 		private DijkstraShortestPath<Node, Edge> rtpShortestPath;
+
+		private IStatisticsManager statisticsManager;
 
 		private ConcurrentMap<Map<Node, Node>, List<Edge>> rtpPathMap = new ConcurrentHashMap<Map<Node, Node>, List<Edge>>();
 
@@ -180,7 +184,7 @@ public class RTPRouting {
 		*/
 
 		public RTPRouting(Map<Node, Set<Edge>> nodes, Edge edges[][], Long latencies[][], Long latency, Long medLatencies[][], Long medLatency,
-		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Graph<Node, Edge> grapho, Map<Edge, Long> bw, Long minBW){
+		ConcurrentMap<Edge, Map<String, ArrayList>> statistics, Map<String, Long> max, Graph<Node, Edge> grapho, Map<Edge, Long> bw, Long minBW, IStatisticsManager manager){
 
 			this.nodeEdges = nodes;
 			this.edgeMatrix = edges;
@@ -192,6 +196,8 @@ public class RTPRouting {
 			this.maxStatistics = max;
 			this.edgeBandWith = bw;
 			this.minBandWith = minBW;
+
+			this.statisticsManager = manager;
 
 			this.g = grapho;
 
@@ -392,89 +398,84 @@ public class RTPRouting {
     */
 
     private List<Edge> reordenateList(List<Edge> path, Node srcNode, Node dstNode){
-      boolean orden = true;
-      boolean orientacion = true;
+			List<Edge> result = new ArrayList();
+	    List<Edge> definitivePath = new ArrayList();
+	    //log.debug("path(0) "+path.get(0)+" head "+path.get(0).getHeadNodeConnector().getNode()+
+	    //" tail " +path.get(0).getTailNodeConnector().getNode());
+	    result = path;
 
-      List<Edge> result = new ArrayList();
-      List<Edge> definitivePath = new ArrayList();
+	    for (int i = 0; i<path.size(); i++){
+	      if(result.get(i).getTailNodeConnector().getNode().equals(srcNode)){
+	        definitivePath.add(path.get(i));
+	        result.remove(i);
+	        break;
+	      }
+	      else if(result.get(i).getHeadNodeConnector().getNode().equals(srcNode)){
+	        Edge temp = result.get(i);
+	        int aux1 = getNodeConnectorIndex(temp.getHeadNodeConnector());
+	        int aux2 = getNodeConnectorIndex(temp.getTailNodeConnector());
+	        definitivePath.add(this.edgeMatrix[aux1][aux2]);
+	        result.remove(i);
+	        break;
+	      }
+	    }
 
-      if(path.get(0).getTailNodeConnector().getNode().equals(srcNode)){
-        orden=true;
-        orientacion=true;
-      }
-      else if(path.get(0).getHeadNodeConnector().getNode().equals(srcNode)){
-        orden=true;
-        orientacion=false;
-      }
-      else if(path.get(path.size()-1).getTailNodeConnector().getNode().equals(srcNode)){
-        orden=false;
-        orientacion=true;
-      }
-      else if(path.get(path.size()-1).getHeadNodeConnector().getNode().equals(srcNode)){
-        orden=false;
-        orientacion=false;
-      }
+	    while(result.size()!=0){
 
-      int i=0;
-      int n1=0;
-      int n2=0;
+	      int i=0;
 
-      if(!orden){
-        i=path.size()-1;
-      }
-      int index;
-      for(int j=0; j<path.size();j++){
+	      Edge tempEdge = result.get(i);
+	      int tempSize = definitivePath.size();
+	      if(tempSize>0){
+	        Edge tempEdge2 = definitivePath.get(tempSize-1);
+	        Node nodeHeadPrevious = tempEdge2.getHeadNodeConnector().getNode();
 
-        if(!orden){
-          index=i-j;
-        }
-        else{
-          index=j;
-        }
+	        Node tempNode1 = tempEdge.getHeadNodeConnector().getNode();
+	        Node tempNode2 = tempEdge.getTailNodeConnector().getNode();
 
-        Edge tempEdge = path.get(index);
+	        if(nodeHeadPrevious.equals(tempNode2)){
+	          definitivePath.add(tempEdge);
+	          result.remove(i);
+	          i=0;
+	        }else if(nodeHeadPrevious.equals(tempNode1)){
+	          int aux1 = getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+	          int aux2 = getNodeConnectorIndex(tempEdge.getTailNodeConnector());
 
-        if(!orientacion){
-          n1=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
-          n2=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
-        }else{
-          n1=getNodeConnectorIndex(tempEdge.getTailNodeConnector());
-          n2=getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
-        }
-        result.add(this.edgeMatrix[n1][n2]);
-      }
-
-      ////////////////////////
-      //Better reordenating
-      ///////////////////////
-
-      definitivePath.add(result.get(0));
-
-
-      for(int j=1; j<result.size(); j++){
-
-        Edge tempEdge2 = result.get(j);
-        Edge tempEdge1 = result.get(j-1);
-
-        Node tempNode1 = tempEdge1.getHeadNodeConnector().getNode();
-        Node tempNode2 = tempEdge2.getTailNodeConnector().getNode();
-
-        Node tempNodeAux = tempEdge2.getHeadNodeConnector().getNode();
-
-
-        if(tempNode1.equals(tempNode2)){
-          definitivePath.add(result.get(j));
-        }else if(tempNode1.equals(tempNodeAux)){
-          int aux1 = getNodeConnectorIndex(tempEdge2.getHeadNodeConnector());
-          int aux2 = getNodeConnectorIndex(tempEdge2.getTailNodeConnector());
-
-          definitivePath.add(this.edgeMatrix[aux1][aux2]);
-        }
-      }
-
-      return definitivePath;
-
+	          definitivePath.add(this.edgeMatrix[aux1][aux2]);
+	          result.remove(i);
+	          i=0;
+	        }
+	      }else{
+	        return null;
+	      }
+	      i++;
+	    }
+			return definitivePath;
     }
+
+		private void resetStatistics(){
+			this.edgeStatistics.clear();
+			Set<Node> tempNodes = this.nodeEdges.keySet();
+			for(Iterator<Node> it = tempNodes.iterator(); it.hasNext();){
+				Node tempNode = it.next();
+				Set<Edge> tempEdges = this.nodeEdges.get(tempNode);
+					for(Iterator<Edge> it2 = tempEdges.iterator(); it2.hasNext();){
+						Edge tempEdge = it2.next();
+							resetNodeConnectorStatistics(tempEdge);
+					}
+
+			}
+		}
+
+		private void resetNodeConnectorStatistics(Edge edge){
+			NodeConnector head = edge.getHeadNodeConnector();
+			NodeConnector tail = edge.getTailNodeConnector();
+
+			NodeConnectorStatistics headStatistics = this.statisticsManager.getNodeConnectorStatistics(head);
+			NodeConnectorStatistics tailStatistics = this.statisticsManager.getNodeConnectorStatistics(tail);
+
+			headStatistics.setReceiveByteCount(tailStatistics.getTransmitByteCount());
+		}
 
 		/**
     *This function is called when is necessary evaluate the latencyMatrix for an edge and
@@ -652,8 +653,8 @@ public class RTPRouting {
 
 	    Map<String, ArrayList> tempStatistics = this.edgeStatistics.get(edge);
 
-	    temp1 = tempStatistics.get(transmitPackets);
-	    temp2 = tempStatistics.get(receivePackets);
+	    temp1 = tempStatistics.get(transmitBytes);
+	    temp2 = tempStatistics.get(receiveBytes);
 
 
 	    if( temp1 == null || temp2 == null ){
@@ -661,19 +662,26 @@ public class RTPRouting {
 	    }else{
 	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
 	      Long receive = temp2.get(0);
-				log.debug("sent "+sent+" receive "+receive);
+				//log.debug("sent " +sent+" receive "+receive);
 	      if(sent!=null && receive!=null){
 	        if(sent>receive){
 	          cost = ((double)sent - (double)receive)*100.0;
 	          cost = cost/(double)sent;
 	        }
 	        else{
-	          return 0.0;
+						/*if(sent<(receive-2000L)){
+							cost = ((double)receive - (double)sent)*100.0;
+		          cost = cost/(double)receive;
+						}
+						else{
+							cost = 2.0;
+						}
+						*/
+						cost = 0.0;
 	        }
 	      }
 
 	    }
-			log.debug("Pérdidas RTP para el enlace "+edge+": "+cost);
 	    return cost;
 	  }
 

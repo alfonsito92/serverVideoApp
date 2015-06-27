@@ -125,8 +125,10 @@ public class PacketHandler implements IListenDataPacket {
 
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
-  private short idleTimeOut = 20;
+  private short idleTimeOut = 10;
   private short hardTimeOut = 30;
+
+  private short hardRTPTimeOut = 1200;
 
   private Map<Node, Set<Packet>> receivedPackets = new HashMap<Node, Set<Packet>>();
 
@@ -1105,7 +1107,7 @@ public class PacketHandler implements IListenDataPacket {
 
           this.rtpSemaphore.tryAcquire();
           this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+          this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith, this.statisticsManager);
           this.rtpSemaphore.release();
 
           return PacketResult.IGNORED;
@@ -1617,7 +1619,7 @@ public class PacketHandler implements IListenDataPacket {
         Flow flow = new Flow(match, actions);
 
         flow.setIdleTimeout(idleTimeOut);
-        flow.setHardTimeout(hardTimeOut);
+        flow.setHardTimeout(hardRTPTimeOut);
 
 
         // Use FlowProgrammerService to program flow.
@@ -1963,7 +1965,7 @@ public class PacketHandler implements IListenDataPacket {
 
       this.rtpSemaphore.tryAcquire();
       this.rtpRouting = new RTPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
-      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith);
+      this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g, this.edgeBandWith, this.minBandWith, this.statisticsManager);
       this.rtpSemaphore.release();
 
       this.audioSemaphore.tryAcquire();
@@ -2144,7 +2146,7 @@ public class PacketHandler implements IListenDataPacket {
 
       if(this.nodeEdges.isEmpty() || !this.nodeEdges.equals(edges) || this.nodeEdges == null){
 
-        MAXFLOODPACKET = 60*this.nodeEdges.size();
+        MAXFLOODPACKET = 5*this.nodeEdges.size();
 
         this.packetTime.clear();
         this.edgePackets.clear();
@@ -2164,8 +2166,6 @@ public class PacketHandler implements IListenDataPacket {
         log.trace("The new map is " + this.nodeEdges);
         resetLatencyMatrix();
         createTopologyGraph();
-
-        //resetStatistics();
 
         updateEdgeStatistics();
 
