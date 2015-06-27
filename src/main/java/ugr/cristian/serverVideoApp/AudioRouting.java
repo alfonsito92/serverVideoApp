@@ -155,7 +155,7 @@ public class AudioRouting {
 
 		private final Integer audioPort = 30000;
 		private final Integer VERSION = 2;
-		private final Integer PAYLOADTYPE = 33; //MPEG2
+		private final Integer PAYLOADTYPE = 0; //G711.ITU PCMU
 	  private final Long AUDIOFACTOR = 1000L; //To get the difference in ms
 	  private final Long AUDIODEFAULTCOST = 500L;
     private final Long DEFAULTBWCOST = 10L;
@@ -672,12 +672,23 @@ public class AudioRouting {
     */
 
     public boolean detectAudioPacket(byte[] rawPayload, int dstPort){
-      boolean result = false;
+			boolean result = false;
 
-      if(dstPort == audioPort){
-        return true;
-      }
-      return result;
+			if(dstPort == audioPort){
+				Byte temp = rawPayload[0];
+				Integer tempVersion = (Integer)(temp & 0xC0)>>6;
+
+				Byte temp2 = rawPayload[1];
+				Integer tempType = (Integer)(temp2 & 0x7F);
+				log.debug("tempVersion y type "+tempVersion+" "+tempType);
+				if(tempVersion == VERSION){
+					if(tempType == TYPE){
+						result=true;
+					}
+				}
+			}
+
+			return result;
     }
 
 		/**
