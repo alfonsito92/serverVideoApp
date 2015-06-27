@@ -781,21 +781,25 @@ public class RTPRouting {
 			List<Edge> tempPath = new ArrayList<Edge>();
       List<Edge> definitivePath = new ArrayList<Edge>();
 
-			if(rtpPathMap.containsKey(tempMap)){
-				rtpPathMap.remove(tempMap);
-			}
+
 			this.rtpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costRTPTransformer);
 			tempPath = rtpShortestPath.getPath(srcNode, dstNode);
-			rtpPathMap.put(tempMap, tempPath);
 
-      boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 
-      if(!temp){
-        definitivePath = reordenateList(tempPath, srcNode, dstNode);
-      }
-      else{
-        definitivePath = tempPath;
-      }
+			//boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
+	    //log.debug("tempPath "+tempPath);
+	    //if(!temp){
+	      definitivePath = reordenateList(tempPath, srcNode, dstNode);
+				if(rtpPathMap.containsKey(definitivePath)){
+					rtpPathMap.remove(definitivePath);
+				}
+				rtpPathMap.put(tempMap, definitivePath);
+	    //}
+	    //else{
+	      //definitivePath = tempPath;
+	    //}
+	    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
+	    //log.debug("path "+definitivePath);
   		return definitivePath;
 
 		}

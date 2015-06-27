@@ -699,23 +699,25 @@ public class AudioRouting {
 			List<Edge> tempPath = new ArrayList<Edge>();
       List<Edge> definitivePath = new ArrayList<Edge>();
 
-			if(audioPathMap.containsKey(tempMap)){
-				tempPath = audioPathMap.remove(tempMap);
-			}
-
 			this.audioShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costAudioTransformer);
 			tempPath = audioShortestPath.getPath(srcNode, dstNode);
-			audioPathMap.put(tempMap, tempPath);
 
 
-      boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 
-      if(!temp){
-        definitivePath = reordenateList(tempPath, srcNode, dstNode);
-      }
-      else{
-        definitivePath = tempPath;
-      }
+			//boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
+	    //log.debug("tempPath "+tempPath);
+	    //if(!temp){
+	      definitivePath = reordenateList(tempPath, srcNode, dstNode);
+				if(audioPathMap.containsKey(definitivePath)){
+					tempPath = audioPathMap.remove(definitivePath);
+				}
+				audioPathMap.put(tempMap, definitivePath);
+	    //}
+	    //else{
+	      //definitivePath = tempPath;
+	    //}
+	    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
+	    //log.debug("path "+definitivePath);
 
   		return definitivePath;
 

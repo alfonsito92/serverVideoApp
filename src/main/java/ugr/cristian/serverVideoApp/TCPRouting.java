@@ -753,23 +753,24 @@ public class TCPRouting {
 			List<Edge> tempPath = new ArrayList<Edge>();
       List<Edge> definitivePath = new ArrayList<Edge>();
 
-			if(tcpPathMap.containsKey(tempMap)){
-				tempPath = tcpPathMap.get(tempMap);
-			}else{
-				this.tcpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTCPTransformer);
-				tempPath = tcpShortestPath.getPath(srcNode, dstNode);
-				tcpPathMap.put(tempMap, tempPath);
-			}
+			this.tcpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.costTCPTransformer);
+			tempPath = tcpShortestPath.getPath(srcNode, dstNode);
 
-      boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
 
-      if(!temp){
-        definitivePath = reordenateList(tempPath, srcNode, dstNode);
-      }
-      else{
-        definitivePath = tempPath;
-      }
-
+			//boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
+	    //log.debug("tempPath "+tempPath);
+	    //if(!temp){
+	      definitivePath = reordenateList(tempPath, srcNode, dstNode);
+				if(tcpPathMap.containsKey(definitivePath)){
+					tcpPathMap.remove(definitivePath);
+				}
+				tcpPathMap.put(tempMap, definitivePath);
+	    //}
+	    //else{
+	      //definitivePath = tempPath;
+	    //}
+	    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
+	    //log.debug("path "+definitivePath);
   		return definitivePath;
 
 		}

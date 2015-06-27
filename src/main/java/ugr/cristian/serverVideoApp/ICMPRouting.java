@@ -669,23 +669,25 @@ return definitivePath;
 		Map<Node, Node> tempMap = new HashMap<Node, Node>();
 		tempMap.put(srcNode, dstNode);
 
-		if(this.icmpPathMap.containsKey(tempMap)){
-		    this.icmpPathMap.remove(tempMap);
-		}
+
 			this.icmpShortestPath = new DijkstraShortestPath<Node,Edge>(this.g, this.icmpCostTransformer);
 			tempPath = icmpShortestPath.getPath(srcNode, dstNode);
-			this.icmpPathMap.put(tempMap, tempPath);
+
 
     //boolean temp = tempPath.get(0).getTailNodeConnector().getNode().equals(srcNode);
-    log.debug("tempPath "+tempPath);
+    //log.debug("tempPath "+tempPath);
     //if(!temp){
       definitivePath = reordenateList(tempPath, srcNode, dstNode);
+      if(this.icmpPathMap.containsKey(definitivePath)){
+  		    this.icmpPathMap.remove(definitivePath);
+  		}
+      this.icmpPathMap.put(tempMap, definitivePath);
     //}
     //else{
       //definitivePath = tempPath;
     //}
-    log.debug("srcNode "+srcNode+" dstNode "+dstNode);
-    log.debug("path "+definitivePath);
+    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
+    //log.debug("path "+definitivePath);
 		return definitivePath;
 
 	}
