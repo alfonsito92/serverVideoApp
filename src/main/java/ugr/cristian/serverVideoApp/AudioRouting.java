@@ -155,7 +155,7 @@ public class AudioRouting {
 
 		private final Integer audioPort = 30000;
 		private final Integer VERSION = 2;
-		private final Integer PAYLOADTYPE = 0; //G711.ITU PCMU
+		private final Integer TYPE = 0; //G711.ITU PCMU
 	  private final Long AUDIOFACTOR = 1000L; //To get the difference in ms
 	  private final Long AUDIODEFAULTCOST = 500L;
     private final Long DEFAULTBWCOST = 10L;
