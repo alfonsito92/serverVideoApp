@@ -1912,6 +1912,14 @@ public class PacketHandler implements IListenDataPacket {
 
     }
 
+    private void resetLatencyMatrix(){
+      if(this.latencyMatrix == null || this.latencyMatrix.length == 0 || this.mediumLatencyMatrix == null || this.mediumLatencyMatrix.length == 0 ){
+        this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        initializeEdgeMediumTime();
+      }
+    }
+
     /**
     *This function restart the latency and mediumLatencyMatrix
     */
@@ -1941,7 +1949,6 @@ public class PacketHandler implements IListenDataPacket {
                   //this.edgeMatrix[aux1][aux2] = null;
                 }
               }
-              first=true;
             }
           }
         }
@@ -1981,6 +1988,7 @@ public class PacketHandler implements IListenDataPacket {
     */
 
     private void resetRoutingProtocols(){
+
       this.icmpSemaphore.tryAcquire();
       this.icmpRouting = new ICMPRouting(this.nodeEdges, this.edgeMatrix, this.latencyMatrix, this.minLatency,
       this.mediumLatencyMatrix, this.minMediumLatency, this.edgeStatistics, this.maxStatistics, this.g);
@@ -2188,17 +2196,19 @@ public class PacketHandler implements IListenDataPacket {
         }
 
         this.nodeEdges = edges;
-
         buildEdgeMatrix(edges);
-
         log.trace("The new map is " + this.nodeEdges);
         createTopologyGraph();
-
         updateEdgeStatistics();
 
-        if(first){
-          resetRoutingProtocols();
-          first=false;
+        if(checkLatencyMatrix()){
+          if(first==true){
+            resetLatencyMatrix();
+            resetRoutingProtocols();
+            first=false;
+          }
+        }else{
+          flood=0;
         }
 
         log.debug("The topology has been updated");
