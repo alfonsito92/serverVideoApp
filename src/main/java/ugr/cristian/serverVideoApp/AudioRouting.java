@@ -680,7 +680,7 @@ public class AudioRouting {
 
 				Byte temp2 = rawPayload[1];
 				Integer tempType = (Integer)(temp2 & 0x7F);
-				log.debug("tempVersion y type "+tempVersion+" "+tempType);
+				//log.debug("tempVersion y type "+tempVersion+" "+tempType);
 				if(tempVersion == VERSION){
 					if(tempType == TYPE){
 						result=true;
@@ -729,7 +729,7 @@ public class AudioRouting {
 	    //}
 	    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
 	    //log.debug("path "+definitivePath);
-
+			//log.debug("Definitive Path "+definitivePath);
   		return definitivePath;
 
 		}

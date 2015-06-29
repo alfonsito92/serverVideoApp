@@ -662,27 +662,19 @@ public class RTPRouting {
 	    }else{
 	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
 	      Long receive = temp2.get(0);
-				//log.debug("sent " +sent+" receive "+receive);
-	      if(sent!=null && receive!=null){
-	        if(sent>receive){
-	          cost = ((double)sent - (double)receive)*100.0;
-	          cost = cost/(double)sent;
-	        }
-	        else{
-						/*if(sent<(receive-2000L)){
-							cost = ((double)receive - (double)sent)*100.0;
-		          cost = cost/(double)receive;
-						}
-						else{
-							cost = 2.0;
-						}
-						*/
-						cost = 0.0;
-	        }
-	      }
+				
+				if(sent!=null && receive!=null){
+					if(sent>receive){
+						cost = ((double)sent - (double)receive)*100.0;
+						cost = cost/(double)sent;
+					}
+					else{
+						return 0.0;
+					}
+				}
 
-	    }
-	    return cost;
+			}
+			return cost;
 	  }
 
 		/**

@@ -126,7 +126,7 @@ public class PacketHandler implements IListenDataPacket {
   private Map<Edge, ArrayList> edgeMediumMapTime = new HashMap<Edge, ArrayList>();
 
   private short idleTimeOut = 10;
-  private short hardTimeOut = 30;
+  private short hardTimeOut = 180;
 
   private short hardRTPTimeOut = 1200;
 
@@ -380,6 +380,7 @@ public class PacketHandler implements IListenDataPacket {
     public void init() {
         log.debug("Routing init() is called");
         this.nodeEdges=new HashMap<Node, Set<Edge>>();
+        this.latencyMatrix = null;
         first=true;
         updateTopology();
 
@@ -1151,7 +1152,7 @@ public class PacketHandler implements IListenDataPacket {
     private void initializeEdgeMediumTime(){
 
       Set<Edge> edges = this.topologyManager.getEdges().keySet();
-
+      edgeMediumMapTime.clear();
       ArrayList<Long> temp;
 
       for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
@@ -1915,10 +1916,37 @@ public class PacketHandler implements IListenDataPacket {
     *This function restart the latency and mediumLatencyMatrix
     */
 
-    private void resetLatencyMatrix(){
-      this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
-      this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
-      initializeEdgeMediumTime();
+    private void resetLatencyMatrix(Map<Node, Set<Edge>> edges){
+      if(this.latencyMatrix == null || this.latencyMatrix.length == 0 || this.mediumLatencyMatrix == null || this.mediumLatencyMatrix.length == 0 ){
+        this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
+        initializeEdgeMediumTime();
+      }else if(edgeMediumMapTime!=null){
+        Set<Node> nodes = edges.keySet();
+
+        for(Iterator<Node> it = nodes.iterator(); it.hasNext();){
+          Node tempNode = it.next();
+          Set<Edge> tempEdgesOld = this.nodeEdges.get(tempNode);
+          Set<Edge> tempEdgesNew = edges.get(tempNode);
+          if(tempEdgesOld!=null && tempEdgesNew!=null){
+
+            if(tempEdgesNew.size() < tempEdgesOld.size()){
+              for(Iterator<Edge> it2 = tempEdgesOld.iterator(); it2.hasNext();){
+                Edge tempEdge = it2.next();
+
+                if(!tempEdgesNew.contains(tempEdge)){
+                  this.edgeMediumMapTime.remove(tempEdge);
+                  //int aux1 = getNodeConnectorIndex(tempEdge.getTailNodeConnector());
+                  //int aux2 = getNodeConnectorIndex(tempEdge.getHeadNodeConnector());
+                  //this.edgeMatrix[aux1][aux2] = null;
+                }
+              }
+              first=true;
+            }
+          }
+        }
+      }
+
     }
 
 
@@ -2146,17 +2174,17 @@ public class PacketHandler implements IListenDataPacket {
 
       if(this.nodeEdges.isEmpty() || !this.nodeEdges.equals(edges) || this.nodeEdges == null){
 
-        MAXFLOODPACKET = 5*this.nodeEdges.size();
-
         this.packetTime.clear();
         this.edgePackets.clear();
         this.edgeBandWith.clear();
         this.minBandWith=0L;
         this.edgeMapTime.clear();
         flood=0;
+        MAXFLOODPACKET = 4*this.nodeEdges.size();
 
         if(this.nodeEdges!=null && edges!=null){
           removeOldFlow(edges);
+          resetLatencyMatrix(edges);
         }
 
         this.nodeEdges = edges;
@@ -2164,7 +2192,6 @@ public class PacketHandler implements IListenDataPacket {
         buildEdgeMatrix(edges);
 
         log.trace("The new map is " + this.nodeEdges);
-        resetLatencyMatrix();
         createTopologyGraph();
 
         updateEdgeStatistics();
