@@ -158,7 +158,7 @@ public class PacketHandler implements IListenDataPacket {
   private int MAXFLOODPACKET = 30;
 
   /*************************************/
-  private final Long UPDATETIME = 1000L; //The time Interval to check the topology in milliseconds.
+  private final Long UPDATETIME = 100L; //The time Interval to check the topology in milliseconds.
   private final Long LEARNTIME = 10000L;
   private Long t1 = System.currentTimeMillis();
   private Long t2 = 0L;
@@ -167,7 +167,7 @@ public class PacketHandler implements IListenDataPacket {
   private Long statisticsT1 = 0L;
   private Long statisticsT2 = 0L;
   /*************************************/
-
+  private boolean force = true;
   /*************************************/ //Semaphores to prevent conflicts between differents instancies of receiveDataPacket
   static final Semaphore semaphore=new Semaphore(1);
   static final Semaphore delFlowSemaphore = new Semaphore(1);
@@ -1165,6 +1165,26 @@ public class PacketHandler implements IListenDataPacket {
     }
 
     /**
+    *This function initialize the map edgeMediumTime
+    */
+
+    private void completeEdgeMediumMapTime(){
+
+      Set<Edge> edges = this.topologyManager.getEdges().keySet();
+      ArrayList<Long> temp;
+
+      for(Iterator<Edge> it = edges.iterator(); it.hasNext();){
+        temp= new ArrayList();
+        Edge tempEdge = it.next();
+        if(!edgeMediumMapTime.containsKey(tempEdge)){
+                  edgeMediumMapTime.put(tempEdge, temp);
+        }
+
+      }
+
+    }
+
+    /**
     *Function that is called when is necesarry to install a List of flows
     *All the flows will have two timeOut, idle and Hard.
     *@param path The Edge List
@@ -1916,7 +1936,11 @@ public class PacketHandler implements IListenDataPacket {
       if(this.latencyMatrix == null || this.latencyMatrix.length == 0 || this.mediumLatencyMatrix == null || this.mediumLatencyMatrix.length == 0 ){
         this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
         this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
-        initializeEdgeMediumTime();
+        if(edgeMediumMapTime == null){
+          initializeEdgeMediumTime();
+        }else{
+          completeEdgeMediumMapTime();
+        }
       }
     }
 
@@ -1925,10 +1949,11 @@ public class PacketHandler implements IListenDataPacket {
     */
 
     private void resetLatencyMatrix(Map<Node, Set<Edge>> edges){
-      if(this.latencyMatrix == null || this.latencyMatrix.length == 0 || this.mediumLatencyMatrix == null || this.mediumLatencyMatrix.length == 0 ){
+      if(this.latencyMatrix == null || this.latencyMatrix.length == 0 || this.mediumLatencyMatrix == null || this.mediumLatencyMatrix.length == 0 || force == true ){
         this.latencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
         this.mediumLatencyMatrix = new Long[this.nodeEdges.size()][this.nodeEdges.size()];
         initializeEdgeMediumTime();
+        force=false;
       }else if(edgeMediumMapTime!=null){
         Set<Node> nodes = edges.keySet();
 
@@ -2188,7 +2213,7 @@ public class PacketHandler implements IListenDataPacket {
         this.minBandWith=0L;
         this.edgeMapTime.clear();
         flood=0;
-        MAXFLOODPACKET = 4*this.nodeEdges.size();
+        MAXFLOODPACKET = 20*this.nodeEdges.size();
 
         if(this.nodeEdges!=null && edges!=null){
           removeOldFlow(edges);
@@ -2203,11 +2228,13 @@ public class PacketHandler implements IListenDataPacket {
 
         if(checkLatencyMatrix()){
           if(first==true){
-            resetLatencyMatrix();
             resetRoutingProtocols();
             first=false;
           }
         }else{
+          first = true;
+          force=true;
+          resetLatencyMatrix();
           flood=0;
         }
 
@@ -2238,11 +2265,11 @@ public class PacketHandler implements IListenDataPacket {
         this.audioSemaphore.release();
 
         //log.debug("Estadisticas: "+this.edgeStatistics);
-        //log.debug("Latencia instantánea: ");
-        //traceLongMatrix(latencyMatrix);
+        log.debug("Latencia instantánea: ");
+        traceLongMatrix(latencyMatrix);
 
-        //log.debug("Latencia media: ");
-        //traceLongMatrix(mediumLatencyMatrix);
+        log.debug("Latencia media: ");
+        traceLongMatrix(mediumLatencyMatrix);
 
         //log.debug("Mapa de tiempos de enlaces: "+edgeMediumMapTime);
     }

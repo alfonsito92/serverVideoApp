@@ -662,7 +662,7 @@ public class RTPRouting {
 	    }else{
 	      Long sent = temp1.get(1); //The 1 correspond to tailConnector and 0 to headConnector
 	      Long receive = temp2.get(0);
-				
+
 				if(sent!=null && receive!=null){
 					if(sent>receive){
 						cost = ((double)sent - (double)receive)*100.0;
@@ -791,7 +791,7 @@ public class RTPRouting {
 	      //definitivePath = tempPath;
 	    //}
 	    //log.debug("srcNode "+srcNode+" dstNode "+dstNode);
-	    //log.debug("path "+definitivePath);
+	    log.debug("path "+definitivePath);
   		return definitivePath;
 
 		}
